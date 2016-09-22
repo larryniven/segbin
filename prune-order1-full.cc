@@ -11,7 +11,7 @@ struct pruning_env {
     fscrf::inference_args i_args;
 
     double dropout_scale;
-    double alpha;
+    double eta;
 
     std::ofstream output;
 
@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
             {"features", "", true},
             {"label", "", true},
             {"dropout-scale", "", false},
-            {"alpha", "", true},
+            {"eta", "", true},
             {"output", "", true}
         }
     };
@@ -72,7 +72,7 @@ pruning_env::pruning_env(std::unordered_map<std::string, std::string> args)
         dropout_scale = std::stod(args.at("dropout-scale"));
     }
 
-    alpha = std::stod(args.at("alpha"));
+    eta = std::stod(args.at("eta"));
 
     output.open(args.at("output"));
 
@@ -118,7 +118,8 @@ void pruning_env::run()
 
         if (ebt::in(std::string("nn-param"), args)) {
             if (ebt::in(std::string("dropout-scale"), args)) {
-                nn = lstm::make_stacked_bi_lstm_nn_with_dropout(comp_graph, lstm_var_tree, frame_ops, lstm::lstm_builder{}, dropout_scale);
+                nn = lstm::make_stacked_bi_lstm_nn_with_dropout(
+                    comp_graph, lstm_var_tree, frame_ops, lstm::lstm_builder{}, dropout_scale);
             } else {
                 nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, lstm::lstm_builder{});
             }
@@ -146,9 +147,6 @@ void pruning_env::run()
             forward.extra[v] = {-1, 0};
         }
         forward.merge(graph, *s.graph_data.topo_order);
-
-        // std::vector<int> rev_topo_order = *s.graph_data.topo_order;
-        // std::reverse(rev_topo_order.begin(), rev_topo_order.end());
 
         fst::backward_one_best<fscrf::fscrf_fst> backward;
         for (auto v: graph.finals()) {
@@ -216,11 +214,12 @@ void pruning_env::run()
             }
         }
 
-        double threshold = alpha * max + (1 - alpha) * sum / edge_count;
+        double threshold = eta * max;
 
+        std::cout << "sample: " << i << std::endl;
         std::cout << "frames: " << s.frames.size() << std::endl;
         std::cout << "max: " << max << " avg: " << sum / edge_count
-            << " threshold: " << threshold << std::endl;
+            << " eta: " << eta << " threshold: " << threshold << std::endl;
         std::cout << "forward: " << f_max << " backward: " << b_max << std::endl;
 
         std::unordered_map<int, int> vertex_map;
