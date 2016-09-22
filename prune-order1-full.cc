@@ -11,7 +11,7 @@ struct pruning_env {
     fscrf::inference_args i_args;
 
     double dropout_scale;
-    double eta;
+    double alpha;
 
     std::ofstream output;
 
@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
             {"features", "", true},
             {"label", "", true},
             {"dropout-scale", "", false},
-            {"eta", "", true},
+            {"alpha", "", true},
             {"output", "", true}
         }
     };
@@ -72,7 +72,7 @@ pruning_env::pruning_env(std::unordered_map<std::string, std::string> args)
         dropout_scale = std::stod(args.at("dropout-scale"));
     }
 
-    eta = std::stod(args.at("eta"));
+    alpha = std::stod(args.at("alpha"));
 
     output.open(args.at("output"));
 
@@ -214,12 +214,12 @@ void pruning_env::run()
             }
         }
 
-        double threshold = eta * max;
+        double threshold = alpha * max + (1 - alpha) * sum / edge_count;
 
         std::cout << "sample: " << i << std::endl;
         std::cout << "frames: " << s.frames.size() << std::endl;
         std::cout << "max: " << max << " avg: " << sum / edge_count
-            << " eta: " << eta << " threshold: " << threshold << std::endl;
+            << " alpha: " << alpha << " threshold: " << threshold << std::endl;
         std::cout << "forward: " << f_max << " backward: " << b_max << std::endl;
 
         std::unordered_map<int, int> vertex_map;
