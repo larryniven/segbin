@@ -320,7 +320,7 @@ void learning_env::run()
 
             tensor_tree::copy_grad(param_grad, var_tree);
 
-            auto& m = tensor_tree::get_matrix(param_grad->children[2]);
+            auto& m = tensor_tree::get_matrix(param_grad->children[0]);
 
             std::cout << "analytic grad: " << m(l_args.label_id.at("sil") - 1, 0) << std::endl;
 
