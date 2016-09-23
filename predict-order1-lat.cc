@@ -6,6 +6,7 @@
 
 struct prediction_env {
 
+    std::ifstream frame_batch;
     std::ifstream lat_batch;
 
     std::shared_ptr<tensor_tree::vertex> param;
@@ -29,6 +30,7 @@ int main(int argc, char *argv[])
         "predict-order1-lat",
         "Predict with segmental CRF",
         {
+            {"frame-batch", "", false},
             {"lat-batch", "", true},
             {"param", "", true},
             {"features", "", true},
@@ -58,11 +60,15 @@ int main(int argc, char *argv[])
 prediction_env::prediction_env(std::unordered_map<std::string, std::string> args)
     : args(args)
 {
+    if (ebt::in(std::string("frame-batch"), args)) {
+        frame_batch.open(args.at("frame-batch"));
+    }
+
     lat_batch.open(args.at("lat-batch"));
 
     features = ebt::split(args.at("features"), ",");
 
-    param = fscrf::lat::make_tensor_tree(features);
+    param = fscrf::make_tensor_tree(features);
     tensor_tree::load_tensor(param, args.at("param"));
 
     label_id = util::load_label_id(args.at("label"));
@@ -86,6 +92,11 @@ void prediction_env::run()
             break;
         }
 
+        std::vector<std::vector<double>> frames;
+        if (ebt::in(std::string("frame-batch"), args)) {
+            frames = speech::load_frame_batch(frame_batch);
+        }
+
         fscrf::fscrf_data graph_data;
         graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(lat));
         graph_data.fst = std::make_shared<ilat::fst>(lat);
@@ -93,7 +104,17 @@ void prediction_env::run()
         autodiff::computation_graph comp_graph;
         std::shared_ptr<tensor_tree::vertex> var_tree = tensor_tree::make_var_tree(comp_graph, param);
 
-        graph_data.weight_func = fscrf::lat::make_weights(features, var_tree);
+        if (ebt::in(std::string("frame-batch"), args)) {
+            std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
+            for (int i = 0; i < frames.size(); ++i) {
+                frame_ops.push_back(comp_graph.var(la::vector<double>(frames[i])));
+            }
+            auto frame_mat = autodiff::col_cat(frame_ops);
+            autodiff::eval(frame_mat, autodiff::eval_funcs);
+            graph_data.weight_func = fscrf::make_weights(features, var_tree, frame_mat);
+        } else {
+            graph_data.weight_func = fscrf::lat::make_weights(features, var_tree);
+        }
 
         fscrf::fscrf_fst scrf { graph_data };
 
