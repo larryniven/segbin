@@ -6,6 +6,7 @@
 
 struct learning_env {
 
+    std::ifstream frame_batch;
     std::ifstream lat_batch;
     std::ifstream gt_batch;
 
@@ -43,6 +44,7 @@ int main(int argc, char *argv[])
         "learn-order1-lat",
         "Learn segmental CRF",
         {
+            {"frame-batch", "", false},
             {"lat-batch", "", true},
             {"gt-batch", "", true},
             {"param", "", true},
@@ -85,6 +87,10 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     lat_batch.open(args.at("lat-batch"));
     gt_batch.open(args.at("gt-batch"));
 
+    if (ebt::in(std::string("frame-batch"), args)) {
+        frame_batch.open(args.at("frame-batch"));
+    }
+
     save_every = std::numeric_limits<int>::max();
     if (ebt::in(std::string("save-every"), args)) {
         save_every = std::stoi(args.at("save-every"));
@@ -102,9 +108,9 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
 
     features = ebt::split(args.at("features"), ",");
 
-    param = fscrf::lat::make_tensor_tree(features);
+    param = fscrf::make_tensor_tree(features);
     tensor_tree::load_tensor(param, args.at("param"));
-    opt_data = fscrf::lat::make_tensor_tree(features);
+    opt_data = fscrf::make_tensor_tree(features);
     tensor_tree::load_tensor(opt_data, args.at("opt-data"));
 
     step_size = std::stod(args.at("step-size"));
@@ -150,6 +156,11 @@ void learning_env::run()
             break;
         }
 
+        std::vector<std::vector<double>> frames;
+        if (ebt::in(std::string("frame-batch"), args)) {
+            frames = speech::load_frame_batch(frame_batch);
+        }
+
         std::cout << lat.data->name << std::endl;
 
         fscrf::fscrf_data graph_data;
@@ -159,7 +170,17 @@ void learning_env::run()
         autodiff::computation_graph comp_graph;
         std::shared_ptr<tensor_tree::vertex> var_tree = tensor_tree::make_var_tree(comp_graph, param);
 
-        graph_data.weight_func = fscrf::lat::make_weights(features, var_tree);
+        if (ebt::in(std::string("frame-batch"), args)) {
+            std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
+            for (int i = 0; i < frames.size(); ++i) {
+                frame_ops.push_back(comp_graph.var(la::vector<double>(frames[i])));
+            }
+            auto frame_mat = autodiff::col_cat(frame_ops);
+            autodiff::eval(frame_mat, autodiff::eval_funcs);
+            graph_data.weight_func = fscrf::make_weights(features, var_tree, frame_mat);
+        } else {
+            graph_data.weight_func = fscrf::lat::make_weights(features, var_tree);
+        }
 
         fscrf::loss_func *loss_func;
 
@@ -173,10 +194,12 @@ void learning_env::run()
 
         std::cout << "loss: " << ell << std::endl;
 
-        std::shared_ptr<tensor_tree::vertex> param_grad = fscrf::lat::make_tensor_tree(features);
+        std::shared_ptr<tensor_tree::vertex> param_grad = fscrf::make_tensor_tree(features);
 
         if (ell > 0) {
             loss_func->grad();
+
+            graph_data.weight_func->grad();
 
             tensor_tree::copy_grad(param_grad, var_tree);
 
