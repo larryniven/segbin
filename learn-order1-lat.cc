@@ -186,6 +186,8 @@ void learning_env::run()
 
         if (args.at("loss") == "hinge-loss") {
             loss_func = new fscrf::hinge_loss { graph_data, gt_segs, sils, cost_scale };
+        } else if (args.at("loss") == "hinge-loss-gt") {
+            loss_func = new fscrf::hinge_loss_gt { graph_data, gt_segs, sils, cost_scale };
         } else if (args.at("loss") == "log-loss") {
             loss_func = new fscrf::log_loss { graph_data, gt_segs, sils };
         }
