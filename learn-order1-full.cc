@@ -243,6 +243,8 @@ void learning_env::run()
         fscrf::loss_func *loss_func;
         if (args.at("loss") == "hinge-loss") {
             loss_func = new fscrf::hinge_loss { s.graph_data, s.gt_segs, l_args.sils, l_args.cost_scale };
+        } else if (args.at("loss") == "hinge-loss-gt") {
+            loss_func = new fscrf::hinge_loss_gt { s.graph_data, s.gt_segs, l_args.sils, l_args.cost_scale };
         } else if (args.at("loss") == "log-loss") {
             loss_func = new fscrf::log_loss { s.graph_data, s.gt_segs, l_args.sils };
         } else if (args.at("loss") == "latent-hinge") {
