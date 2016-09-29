@@ -25,7 +25,8 @@ bin = \
     loss-order1-full \
     learn-order1-lat \
     predict-order1-lat \
-    forced-align-order1-full
+    forced-align-order1-full \
+    prune-random
 
 .PHONY: all clean
 
@@ -122,4 +123,6 @@ learn-order1-lat: learn-order1-lat.o
 predict-order1-lat: predict-order1-lat.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
+prune-random: prune-random.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
