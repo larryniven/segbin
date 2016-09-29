@@ -72,7 +72,8 @@ void oracle_env::run()
 
     int i = 1;
 
-    double cost_sum = 0;
+    double min_cost_sum = 0;
+    double max_cost_sum = 0;
     double frames_sum = 0;
 
     while (1) {
@@ -100,24 +101,42 @@ void oracle_env::run()
 
         s.graph_data.weight_func = s.graph_data.cost_func;
 
-        std::shared_ptr<ilat::fst> graph_path = scrf::shortest_path(s.graph_data);
+        std::shared_ptr<ilat::fst> min_path = scrf::shortest_path(s.graph_data);
 
         scrf::scrf_fst<iscrf::iscrf_data> graph { s.graph_data };
 
-        double cost = 0;
-        for (auto& e: graph_path->edges()) {
-            cost -= graph.weight(e);
+        double min_cost = 0;
+        for (auto& e: min_path->edges()) {
+            min_cost -= graph.weight(e);
         }
 
-        std::cout << i << ": cost: " << cost << " frames: " << lat.time(lat.finals().front()) << " er: " << cost / lat.time(lat.finals().front()) << std::endl;
+        s.graph_data.cost_func = std::make_shared<scrf::seg_cost<ilat::fst>>(
+            scrf::make_overlap_cost<ilat::fst>(s.gold_segs, l_args.sils));
 
-        cost_sum += cost;
+        s.graph_data.weight_func = s.graph_data.cost_func;
+
+        std::shared_ptr<ilat::fst> max_path = scrf::shortest_path(s.graph_data);
+
+        double max_cost = 0;
+        for (auto& e: max_path->edges()) {
+            max_cost += graph.weight(e);
+        }
+
+
+        std::cout << i << ": min cost: " << min_cost << " max cost: " << max_cost << " frames: " << lat.time(lat.finals().front())
+            << " min er: " << min_cost / lat.time(lat.finals().front())
+            << " max er: " << max_cost / lat.time(lat.finals().front()) << std::endl;
+
+        min_cost_sum += min_cost;
+        max_cost_sum += max_cost;
         frames_sum += lat.time(lat.finals().front());
 
         ++i;
     }
 
-    std::cout << "total cost: " << cost_sum << " total frames: " << frames_sum << " er: " << cost_sum / frames_sum << std::endl;
+    std::cout << "total min cost: " << min_cost_sum << " total max cost: " << max_cost_sum << " total frames: " << frames_sum
+        << " min er: " << min_cost_sum / frames_sum
+        << " max er: " << max_cost_sum / frames_sum << std::endl;
 
 }
 
