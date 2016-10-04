@@ -23,7 +23,6 @@ struct learning_env {
     double dropout_scale;
 
     double dropout;
-    int dropout_seed;
 
     double clip;
 
@@ -69,9 +68,10 @@ int main(int argc, char *argv[])
             {"dropout-scale", "", false},
             {"clip", "", false},
             {"dropout", "", false},
-            {"dropout-seed", "", false},
             {"freeze-encoder", "", false},
-            {"mini-batch", "", false}
+            {"mini-batch", "", false},
+            {"edge-drop", "", false},
+            {"seed", "", false},
         }
     };
 
@@ -143,11 +143,6 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         dropout = std::stod(args.at("dropout"));
     }
 
-    dropout_seed = 0;
-    if (ebt::in(std::string("dropout-seed"), args)) {
-        dropout_seed = std::stoi(args.at("dropout-seed"));
-    }
-
     if (ebt::in(std::string("clip"), args)) {
         clip = std::stod(args.at("clip"));
     }
@@ -165,8 +160,6 @@ void learning_env::run()
     ebt::Timer timer;
 
     int i = 0;
-
-    std::default_random_engine gen { dropout_seed };
 
     std::shared_ptr<tensor_tree::vertex> accu_param_grad
         = fscrf::make_tensor_tree(l_args.features);
@@ -224,7 +217,7 @@ void learning_env::run()
             if (ebt::in(std::string("dropout-scale"), args)) {
                 nn = lstm::make_stacked_bi_lstm_nn_with_dropout(comp_graph, lstm_var_tree, frame_ops, lstm::lstm_builder{}, dropout_scale);
             } else if (ebt::in(std::string("dropout"), args)) {
-                nn = lstm::make_stacked_bi_lstm_nn_with_dropout(comp_graph, lstm_var_tree, frame_ops, lstm::lstm_builder{}, gen, dropout);
+                nn = lstm::make_stacked_bi_lstm_nn_with_dropout(comp_graph, lstm_var_tree, frame_ops, lstm::lstm_builder{}, l_args.gen, dropout);
             } else { 
                 nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, lstm::lstm_builder{});
             }
