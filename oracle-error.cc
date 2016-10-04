@@ -23,7 +23,8 @@ struct oracle_env {
 };
 
 ilat::fst make_label_fst(std::vector<std::string> const& label_seq,
-    std::unordered_map<std::string, int> const& label_id);
+    std::unordered_map<std::string, int> const& label_id,
+    std::unordered_set<int> const& labels);
 
 std::tuple<int, int, int, int> error_analysis(std::vector<std::tuple<int, int>> const& edges,
     ilat::lazy_pair_mode1 const& composed_fst);
@@ -100,6 +101,8 @@ void oracle_env::run()
 
     while (1) {
 
+        std::unordered_set<int> local_labels;
+
         iscrf::sample s { i_args };
 
         std::vector<std::string> label_seq = util::load_labels(label_batch);
@@ -118,11 +121,19 @@ void oracle_env::run()
             e.weight = 0;
         }
 
+        for (auto& e: lat.edges()) {
+            local_labels.insert(lat.input(e));
+        }
+
+        for (auto& s: label_seq) {
+            local_labels.insert(i_args.label_id.at(s));
+        }
+
         iscrf::make_lattice(lat, s);
 
         ilat::add_eps_loops(lat);
 
-        ilat::fst label_fst = make_label_fst(label_seq, i_args.label_id);
+        ilat::fst label_fst = make_label_fst(label_seq, i_args.label_id, local_labels);
 
         for (auto& ig: ignored) {
             ilat::add_eps_loops(label_fst, i_args.label_id.at(ig));
@@ -193,7 +204,8 @@ void oracle_env::run()
 }
 
 ilat::fst make_label_fst(std::vector<std::string> const& label_seq,
-    std::unordered_map<std::string, int> const& label_id)
+    std::unordered_map<std::string, int> const& label_id,
+    std::unordered_set<int> const& labels)
 {
     ilat::fst_data data;
     data.symbol_id = std::make_shared<std::unordered_map<std::string, int>>(label_id);
@@ -206,7 +218,7 @@ ilat::fst make_label_fst(std::vector<std::string> const& label_seq,
         ilat::add_vertex(data, u, ilat::vertex_data { u });
 
         // substitution & insertion
-        for (int ell = 0; ell < label_id.size(); ++ell) {
+        for (int ell: labels) {
             int e = data.edges.size();
             ilat::add_edge(data, e, ilat::edge_data { v, u,
                 (ell == label_id.at(label_seq.at(i)) ? 0.0 : -1.0),
@@ -221,7 +233,7 @@ ilat::fst make_label_fst(std::vector<std::string> const& label_seq,
 
     for (int v = 0; v < data.vertices.size(); ++v) {
         // deletion
-        for (int ell = 1; ell < label_id.size(); ++ell) {
+        for (int ell: labels) {
             int e = data.edges.size();
             ilat::add_edge(data, e, ilat::edge_data { v, v,
                 -1, ell, 0 });
