@@ -217,13 +217,18 @@ ilat::fst make_label_fst(std::vector<std::string> const& label_seq,
         int u = data.vertices.size();
         ilat::add_vertex(data, u, ilat::vertex_data { u });
 
-        // substitution & insertion
+        // substitution
         for (int ell: labels) {
             int e = data.edges.size();
             ilat::add_edge(data, e, ilat::edge_data { v, u,
                 (ell == label_id.at(label_seq.at(i)) ? 0.0 : -1.0),
                 ell, label_id.at(label_seq.at(i)) });
         }
+
+        // insertion
+        int e = data.edges.size();
+        ilat::add_edge(data, e, ilat::edge_data { v, u,
+            -1.0, 0, label_id.at(label_seq.at(i)) });
 
         v = u;
     }
@@ -271,5 +276,4 @@ std::tuple<int, int, int, int> error_analysis(std::vector<std::tuple<int, int>> 
     return std::make_tuple(ins, del, sub, length);
 
 }
-
 
