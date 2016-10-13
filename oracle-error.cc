@@ -1,4 +1,4 @@
-#include "seg/iscrf.h"
+#include "seg/fscrf.h"
 #include "seg/loss.h"
 #include "seg/scrf_weight.h"
 #include "seg/util.h"
@@ -10,7 +10,7 @@ struct oracle_env {
 
     std::ifstream lattice_batch;
 
-    iscrf::inference_args i_args;
+    fscrf::inference_args i_args;
 
     std::vector<std::string> ignored;
 
@@ -103,8 +103,6 @@ void oracle_env::run()
 
         std::unordered_set<int> local_labels;
 
-        iscrf::sample s { i_args };
-
         std::vector<std::string> label_seq = util::load_labels(label_batch);
 
         if (!label_batch) {
@@ -128,8 +126,6 @@ void oracle_env::run()
         for (auto& s: label_seq) {
             local_labels.insert(i_args.label_id.at(s));
         }
-
-        iscrf::make_lattice(lat, s);
 
         ilat::add_eps_loops(lat);
 
