@@ -126,9 +126,9 @@ void prediction_env::run()
 
         one_best.merge(scrf, *graph_data.topo_order);
 
-        std::vector<int> paths = one_best.best_path(scrf);
+        std::vector<int> path = one_best.best_path(scrf);
 
-        for (auto& e: paths) {
+        for (auto& e: path) {
             std::cout << id_label.at(scrf.output(e)) << " ";
         }
         std::cout << "(" << lat.data->name << ")" << std::endl;

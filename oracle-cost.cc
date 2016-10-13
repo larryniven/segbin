@@ -1,7 +1,7 @@
-#include "seg/iscrf.h"
 #include "seg/loss.h"
 #include "seg/scrf_weight.h"
 #include "seg/util.h"
+#include "seg/fscrf.h"
 #include <fstream>
 
 struct oracle_env {
@@ -10,7 +10,7 @@ struct oracle_env {
 
     std::ifstream lattice_batch;
 
-    iscrf::learning_args l_args;
+    fscrf::learning_args l_args;
 
     std::unordered_map<std::string, std::string> args;
 
@@ -78,50 +78,57 @@ void oracle_env::run()
 
     while (1) {
 
-        iscrf::learning_sample s { l_args };
-
-        s.gold_segs = util::load_segments(gold_batch, l_args.label_id);
-
-        if (!gold_batch) {
-            break;
-        }
-
         ilat::fst lat = ilat::load_lattice(lattice_batch, l_args.label_id);
+        std::vector<segcost::segment<int>> gold_segs = util::load_segments(gold_batch, l_args.label_id);
 
-        if (!lattice_batch) {
+        if (!lattice_batch || !gold_batch) {
             break;
         }
 
-        iscrf::make_lattice(lat, s);
-
-        s.graph_data.cost_func = std::make_shared<scrf::mul<ilat::fst>>(scrf::mul<ilat::fst>(
+        fscrf::fscrf_data graph_data;
+        graph_data.cost_func = std::make_shared<scrf::mul<ilat::fst>>(scrf::mul<ilat::fst>(
             std::make_shared<scrf::seg_cost<ilat::fst>>(
-                scrf::make_overlap_cost<ilat::fst>(s.gold_segs, l_args.sils)),
+                scrf::make_overlap_cost<ilat::fst>(gold_segs, l_args.sils)),
             -1));
 
-        s.graph_data.weight_func = s.graph_data.cost_func;
+        graph_data.weight_func = graph_data.cost_func;
 
-        std::shared_ptr<ilat::fst> min_path = scrf::shortest_path(s.graph_data);
+        fscrf::fscrf_fst scrf { graph_data };
 
-        scrf::scrf_fst<iscrf::iscrf_data> graph { s.graph_data };
+        fst::forward_one_best<fscrf::fscrf_fst> min_one_best;
+
+        for (auto& i: scrf.initials()) {
+            min_one_best.extra[i] = fst::forward_one_best<fscrf::fscrf_fst>::extra_data {-1, 0};
+        }
+
+        min_one_best.merge(scrf, *graph_data.topo_order);
+
+        std::vector<int> min_path = min_one_best.best_path(scrf);
 
         double min_cost = 0;
-        for (auto& e: min_path->edges()) {
-            min_cost -= graph.weight(e);
+        for (auto& e: min_path) {
+            min_cost -= scrf.weight(e);
         }
 
-        s.graph_data.cost_func = std::make_shared<scrf::seg_cost<ilat::fst>>(
-            scrf::make_overlap_cost<ilat::fst>(s.gold_segs, l_args.sils));
+        graph_data.cost_func = std::make_shared<scrf::seg_cost<ilat::fst>>(
+            scrf::make_overlap_cost<ilat::fst>(gold_segs, l_args.sils));
 
-        s.graph_data.weight_func = s.graph_data.cost_func;
+        graph_data.weight_func = graph_data.cost_func;
 
-        std::shared_ptr<ilat::fst> max_path = scrf::shortest_path(s.graph_data);
+        fst::forward_one_best<fscrf::fscrf_fst> max_one_best;
+
+        for (auto& i: scrf.initials()) {
+            max_one_best.extra[i] = fst::forward_one_best<fscrf::fscrf_fst>::extra_data {-1, 0};
+        }
+
+        max_one_best.merge(scrf, *graph_data.topo_order);
+
+        std::vector<int> max_path = max_one_best.best_path(scrf);
 
         double max_cost = 0;
-        for (auto& e: max_path->edges()) {
-            max_cost += graph.weight(e);
+        for (auto& e: max_path) {
+            max_cost += scrf.weight(e);
         }
-
 
         std::cout << i << ": min cost: " << min_cost << " max cost: " << max_cost << " frames: " << lat.time(lat.finals().front())
             << " min er: " << min_cost / lat.time(lat.finals().front())
