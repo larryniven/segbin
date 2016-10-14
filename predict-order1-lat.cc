@@ -113,7 +113,7 @@ void prediction_env::run()
             autodiff::eval(frame_mat, autodiff::eval_funcs);
             graph_data.weight_func = fscrf::make_weights(features, var_tree, frame_mat);
         } else {
-            graph_data.weight_func = fscrf::lat::make_weights(features, var_tree);
+            graph_data.weight_func = fscrf::make_lat_weights(features, var_tree);
         }
 
         fscrf::fscrf_fst scrf { graph_data };

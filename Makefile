@@ -61,3 +61,6 @@ predict-order1-lat: predict-order1-lat.o
 prune-random: prune-random.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
+learn-order2-lat: learn-order2-lat.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+

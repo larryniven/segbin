@@ -24,6 +24,8 @@ struct learning_env {
     std::string output_param;
     std::string output_opt_data;
 
+    std::shared_ptr<ilat::fst> lm;
+
     double cost_scale;
 
     std::vector<std::string> id_label;
@@ -47,6 +49,7 @@ int main(int argc, char *argv[])
             {"frame-batch", "", false},
             {"lat-batch", "", true},
             {"gt-batch", "", true},
+            {"lm", "", true},
             {"param", "", true},
             {"opt-data", "", true},
             {"step-size", "", true},
@@ -129,6 +132,10 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         id_label[p.second] = p.first;
     }
 
+    std::ifstream lm_stream { args.at("lm") };
+    lm = std::make_shared<ilat::fst>(ilat::load_arpa_lm(lm_stream, label_id));
+    lm_stream.close();
+
     if (ebt::in(std::string("sils"), args)) {
         for (auto& s: ebt::split(args.at("sils"))) {
             sils.push_back(label_id.at(s));
@@ -163,33 +170,21 @@ void learning_env::run()
 
         std::cout << lat.data->name << std::endl;
 
-        fscrf::fscrf_data graph_data;
-        graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(lat));
-        graph_data.fst = std::make_shared<ilat::fst>(lat);
+        ilat::lazy_pair_mode2 composed_fst { *lm, lat };
+
+        fscrf::fscrf_pair_data graph_data;
+        graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(composed_fst));
+        graph_data.fst = std::make_shared<ilat::lazy_pair_mode2>(composed_fst);
 
         autodiff::computation_graph comp_graph;
         std::shared_ptr<tensor_tree::vertex> var_tree = tensor_tree::make_var_tree(comp_graph, param);
 
-        if (ebt::in(std::string("frame-batch"), args)) {
-            std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
-            for (int i = 0; i < frames.size(); ++i) {
-                frame_ops.push_back(comp_graph.var(la::vector<double>(frames[i])));
-            }
-            auto frame_mat = autodiff::col_cat(frame_ops);
-            autodiff::eval(frame_mat, autodiff::eval_funcs);
-            graph_data.weight_func = fscrf::make_weights(features, var_tree, frame_mat);
-        } else {
-            graph_data.weight_func = fscrf::make_lat_weights(features, var_tree);
-        }
+        // graph_data.weight_func = fscrf::lat::make_weights(features, var_tree);
 
         fscrf::loss_func *loss_func;
 
         if (args.at("loss") == "hinge-loss") {
-            loss_func = new fscrf::hinge_loss { graph_data, gt_segs, sils, cost_scale };
-        } else if (args.at("loss") == "hinge-loss-gt") {
-            loss_func = new fscrf::hinge_loss_gt { graph_data, gt_segs, sils, cost_scale };
-        } else if (args.at("loss") == "log-loss") {
-            loss_func = new fscrf::log_loss { graph_data, gt_segs, sils };
+            // loss_func = new fscrf::hinge_loss { graph_data, gt_segs, sils, cost_scale };
         }
 
         double ell = loss_func->loss();
