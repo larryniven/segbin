@@ -12,7 +12,9 @@ bin = \
     learn-order1-lat \
     predict-order1-lat \
     forced-align-order1-full \
-    prune-random
+    prune-random \
+    learn-order2-lat \
+    predict-order2-lat
 
 .PHONY: all clean
 
@@ -62,5 +64,8 @@ prune-random: prune-random.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 learn-order2-lat: learn-order2-lat.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+predict-order2-lat: predict-order2-lat.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 

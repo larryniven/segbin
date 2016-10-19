@@ -170,21 +170,23 @@ void learning_env::run()
 
         std::cout << lat.data->name << std::endl;
 
-        ilat::lazy_pair_mode2 composed_fst { *lm, lat };
+        ilat::add_eps_loops(lat);
+
+        ilat::lazy_pair_mode1 composed_fst { lat, *lm };
 
         fscrf::fscrf_pair_data graph_data;
-        graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(composed_fst));
-        graph_data.fst = std::make_shared<ilat::lazy_pair_mode2>(composed_fst);
+        graph_data.topo_order = std::make_shared<std::vector<std::tuple<int, int>>>(fst::topo_order(composed_fst));
+        graph_data.fst = std::make_shared<ilat::lazy_pair_mode1>(composed_fst);
 
         autodiff::computation_graph comp_graph;
         std::shared_ptr<tensor_tree::vertex> var_tree = tensor_tree::make_var_tree(comp_graph, param);
 
-        // graph_data.weight_func = fscrf::lat::make_weights(features, var_tree);
+        graph_data.weight_func = fscrf::make_pair_weights(features, var_tree, frames);
 
         fscrf::loss_func *loss_func;
 
         if (args.at("loss") == "hinge-loss") {
-            // loss_func = new fscrf::hinge_loss { graph_data, gt_segs, sils, cost_scale };
+            loss_func = new fscrf::hinge_loss_pair { graph_data, gt_segs, sils, cost_scale };
         }
 
         double ell = loss_func->loss();
