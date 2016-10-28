@@ -105,7 +105,7 @@ void loss_env::run()
             frame_ops.push_back(comp_graph.var(la::vector<double>(s.frames[i])));
         }
 
-        auto frame_mat = autodiff::col_cat(frame_ops);
+        auto frame_mat = autodiff::row_cat(frame_ops);
 
         s.graph_data.weight_func = fscrf::make_weights(l_args.features, var_tree, frame_mat);
 

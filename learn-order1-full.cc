@@ -227,7 +227,7 @@ void learning_env::run()
             feat_ops = frame_ops;
         }
 
-        auto frame_mat = autodiff::col_cat(feat_ops);
+        auto frame_mat = autodiff::row_cat(feat_ops);
 
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
@@ -286,7 +286,7 @@ void learning_env::run()
                 frame_ops2.push_back(comp_graph2.var(la::vector<double>(s2.frames[i])));
             }
 
-            auto frame_mat2 = autodiff::col_cat(frame_ops2);
+            auto frame_mat2 = autodiff::row_cat(frame_ops2);
 
             s2.graph_data.weight_func = fscrf::make_weights(l_args2.features, var_tree2, frame_mat2);
 

@@ -10,6 +10,11 @@ struct prediction_env {
     std::ifstream lat_batch;
 
     std::shared_ptr<tensor_tree::vertex> param;
+    std::shared_ptr<tensor_tree::vertex> nn_param;
+    std::shared_ptr<tensor_tree::vertex> pred_param;
+
+    int layer;
+    double dropout_scale;
 
     std::vector<std::string> features;
 
@@ -33,8 +38,10 @@ int main(int argc, char *argv[])
             {"frame-batch", "", false},
             {"lat-batch", "", true},
             {"param", "", true},
+            {"nn-param", "", false},
             {"features", "", true},
             {"label", "", true},
+            {"dropout-scale", "", false}
         }
     };
 
@@ -71,6 +78,16 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
     param = fscrf::make_tensor_tree(features);
     tensor_tree::load_tensor(param, args.at("param"));
 
+    if (ebt::in(std::string("nn-param"), args)) {
+        std::tie(layer, nn_param, pred_param)
+            = fscrf::load_lstm_param(args.at("nn-param"));
+    }
+
+    dropout_scale = 0;
+    if (ebt::in(std::string("dropout-scale"), args)) {
+        dropout_scale = std::stod(args.at("dropout-scale"));
+    }
+
     label_id = util::load_label_id(args.at("label"));
     id_label.resize(label_id.size());
     for (auto& p: label_id) {
@@ -104,12 +121,40 @@ void prediction_env::run()
         autodiff::computation_graph comp_graph;
         std::shared_ptr<tensor_tree::vertex> var_tree = tensor_tree::make_var_tree(comp_graph, param);
 
+        std::shared_ptr<autodiff::op_t> frame_mat;
+
+        std::shared_ptr<tensor_tree::vertex> lstm_var_tree;
+        std::shared_ptr<tensor_tree::vertex> pred_var_tree;
+        if (ebt::in(std::string("nn-param"), args)) {
+            lstm_var_tree = make_var_tree(comp_graph, nn_param);
+            pred_var_tree = make_var_tree(comp_graph, pred_param);
+        }
+
+        lstm::stacked_bi_lstm_nn_t nn;
+        rnn::pred_nn_t pred_nn;
+
         if (ebt::in(std::string("frame-batch"), args)) {
             std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
             for (int i = 0; i < frames.size(); ++i) {
                 frame_ops.push_back(comp_graph.var(la::vector<double>(frames[i])));
             }
-            auto frame_mat = autodiff::col_cat(frame_ops);
+
+            std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
+
+            if (ebt::in(std::string("nn-param"), args)) {
+                if (ebt::in(std::string("dropout-scale"), args)) {
+                    nn = lstm::make_stacked_bi_lstm_nn_with_dropout(comp_graph, lstm_var_tree, frame_ops, lstm::lstm_builder{}, dropout_scale);
+                } else { 
+                    nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, lstm::lstm_builder{});
+                }
+                pred_nn = rnn::make_pred_nn(pred_var_tree, nn.layer.back().output);
+                feat_ops = pred_nn.logprob;
+            } else {
+                feat_ops = frame_ops;
+            }
+
+            frame_mat = autodiff::row_cat(feat_ops);
+
             autodiff::eval(frame_mat, autodiff::eval_funcs);
             graph_data.weight_func = fscrf::make_weights(features, var_tree, frame_mat);
         } else {

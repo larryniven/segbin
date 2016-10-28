@@ -130,7 +130,7 @@ void forced_alignment_env::run()
             feat_ops = frame_ops;
         }
 
-        auto frame_mat = autodiff::col_cat(feat_ops);
+        auto frame_mat = autodiff::row_cat(feat_ops);
 
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
