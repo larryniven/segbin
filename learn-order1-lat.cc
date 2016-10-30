@@ -307,6 +307,12 @@ void learning_env::run()
                 tensor_tree::copy_grad(pred_grad, pred_var_tree);
             }
 
+            double w1 = 0;
+
+            if (ebt::in(std::string("nn-param"), args)) {
+                w1 = tensor_tree::get_matrix(nn_param->children[0]->children[0]->children[0])(0, 0);
+            }
+
             if (ebt::in(std::string("decay"), args)) {
                 tensor_tree::rmsprop_update(param, param_grad, opt_data,
                     decay, step_size);
@@ -339,6 +345,12 @@ void learning_env::run()
                 }
             }
 
+            double w2 = 0;
+
+            if (ebt::in(std::string("nn-param"), args)) {
+                w2 = tensor_tree::get_matrix(nn_param->children[0]->children[0]->children[0])(0, 0);
+                std::cout << "weight: " << w1 << " update: " << w2 - w1 << " ratio: " << (w2 - w1) / w1 << std::endl;
+            }
         }
 
         if (ell < 0) {
