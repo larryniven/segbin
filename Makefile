@@ -17,7 +17,8 @@ bin = \
     predict-order2-lat \
     loss-order2-lat \
     overlap-vs-per \
-    segrnn-learn
+    segrnn-learn \
+    segrnn-predict
 
 .PHONY: all clean
 
@@ -79,5 +80,8 @@ overlap-vs-per: overlap-vs-per.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-learn: segrnn-learn.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+segrnn-predict: segrnn-predict.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
