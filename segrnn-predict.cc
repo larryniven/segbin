@@ -34,7 +34,8 @@ int main(int argc, char *argv[])
             {"features", "", true},
             {"label", "", true},
             {"dropout", "", false},
-            {"subsampling", "", false}
+            {"subsampling", "", false},
+            {"logsoftmax", "", false}
         }
     };
 
@@ -91,10 +92,8 @@ void prediction_env::run()
 
         std::shared_ptr<tensor_tree::vertex> lstm_var_tree;
         std::shared_ptr<tensor_tree::vertex> pred_var_tree;
-        if (ebt::in(std::string("nn-param"), args)) {
-            lstm_var_tree = make_var_tree(comp_graph, i_args.nn_param);
-            pred_var_tree = make_var_tree(comp_graph, i_args.pred_param);
-        }
+        lstm_var_tree = make_var_tree(comp_graph, i_args.nn_param);
+        pred_var_tree = make_var_tree(comp_graph, i_args.pred_param);
 
         lstm::stacked_bi_lstm_nn_t nn;
         rnn::pred_nn_t pred_nn;
@@ -109,7 +108,7 @@ void prediction_env::run()
 
         if (ebt::in(std::string("dropout"), args)) {
             builder = std::make_shared<lstm::bi_lstm_input_scaling>(
-                lstm::bi_lstm_input_scaling { dropout, builder });
+                lstm::bi_lstm_input_scaling { 1.0 - dropout, builder });
         }
 
         if (ebt::in(std::string("subsampling"), args)) {
