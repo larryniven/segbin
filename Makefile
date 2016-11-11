@@ -14,7 +14,10 @@ bin = \
     forced-align-order1-full \
     prune-random \
     learn-order2-lat \
-    predict-order2-lat
+    predict-order2-lat \
+    loss-order2-lat \
+    overlap-vs-per \
+    segrnn-learn
 
 .PHONY: all clean
 
@@ -67,5 +70,14 @@ learn-order2-lat: learn-order2-lat.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 predict-order2-lat: predict-order2-lat.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+loss-order2-lat: loss-order2-lat.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+overlap-vs-per: overlap-vs-per.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+segrnn-learn: segrnn-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
