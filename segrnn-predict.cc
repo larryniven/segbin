@@ -76,6 +76,10 @@ void prediction_env::run()
 {
     int i = 1;
 
+    la::vector<double> one_vec;
+    auto& m = tensor_tree::get_matrix(i_args.nn_param->children[0]->children[0]->children[0]);
+    one_vec.resize(m.rows(), 1);
+
     while (1) {
 
         fscrf::sample s { i_args };
@@ -103,8 +107,10 @@ void prediction_env::run()
             frame_ops.push_back(comp_graph.var(la::vector<double>(s.frames[i])));
         }
 
+        std::shared_ptr<autodiff::op_t> one = comp_graph.var(one_vec);
+
         std::shared_ptr<lstm::bi_lstm_builder> builder
-            = std::make_shared<lstm::bi_lstm_builder>(lstm::bi_lstm_builder{});
+            = std::make_shared<lstm::dyer_bi_lstm_builder>(lstm::dyer_bi_lstm_builder{one});
 
         if (ebt::in(std::string("dropout"), args)) {
             builder = std::make_shared<lstm::bi_lstm_input_scaling>(
@@ -118,7 +124,7 @@ void prediction_env::run()
 
         std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
 
-        nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, lstm::bi_lstm_builder{});
+        nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, *builder);
 
         if (ebt::in(std::string("logsoftmax"), args)) {
             pred_nn = rnn::make_pred_nn(pred_var_tree, nn.layer.back().output);

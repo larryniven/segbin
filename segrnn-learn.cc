@@ -135,6 +135,10 @@ void learning_env::run()
 
     int i = 0;
 
+    la::vector<double> one_vec;
+    auto& m = tensor_tree::get_matrix(l_args.nn_param->children[0]->children[0]->children[0]);
+    one_vec.resize(m.rows(), 1);
+
     while (1) {
 
         fscrf::learning_sample s { l_args };
@@ -168,8 +172,13 @@ void learning_env::run()
 
         std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
 
+        std::shared_ptr<autodiff::op_t> one = comp_graph.var(one_vec);
+
         std::shared_ptr<lstm::bi_lstm_builder> builder
-            = std::make_shared<lstm::bi_lstm_builder>(lstm::bi_lstm_builder{});
+            = std::make_shared<lstm::dyer_bi_lstm_builder>(lstm::dyer_bi_lstm_builder{one});
+
+        // std::shared_ptr<lstm::bi_lstm_builder> builder
+        //     = std::make_shared<lstm::bi_lstm_builder>(lstm::bi_lstm_builder{});
 
         if (ebt::in(std::string("dropout"), args)) {
             builder = std::make_shared<lstm::bi_lstm_input_dropout>(
@@ -211,11 +220,96 @@ void learning_env::run()
 
         std::cout << "loss: " << ell << std::endl;
 
+#if 0
+        {
+            fscrf::learning_args l_args2 = l_args;
+            l_args2.param = tensor_tree::copy_tree(l_args.param);
+            l_args2.opt_data = tensor_tree::copy_tree(l_args.opt_data);
+
+            auto& v = tensor_tree::get_vector(l_args2.param->children[0]->children[8]);
+            v(0) += 1e-8;
+
+            fscrf::learning_sample s2 { l_args2 };
+            s2.frames = s.frames;
+
+            autodiff::computation_graph comp_graph2;
+            std::shared_ptr<tensor_tree::vertex> var_tree2
+                = tensor_tree::make_var_tree(comp_graph2, l_args2.param);
+
+            auto one2 = comp_graph2.var(one_vec);
+
+            std::shared_ptr<tensor_tree::vertex> lstm_var_tree2;
+            std::shared_ptr<tensor_tree::vertex> pred_var_tree2;
+            lstm_var_tree2 = make_var_tree(comp_graph2, l_args2.nn_param);
+            pred_var_tree2 = make_var_tree(comp_graph2, l_args2.pred_param);
+
+            lstm::stacked_bi_lstm_nn_t nn2;
+            rnn::pred_nn_t pred_nn2;
+
+            std::vector<std::shared_ptr<autodiff::op_t>> frame_ops2;
+            for (int i = 0; i < s2.frames.size(); ++i) {
+                frame_ops2.push_back(comp_graph2.var(la::vector<double>(s2.frames[i])));
+            }
+
+            std::vector<std::shared_ptr<autodiff::op_t>> feat_ops2;
+
+            std::shared_ptr<lstm::bi_lstm_builder> builder2
+                = std::make_shared<lstm::dyer_bi_lstm_builder>(lstm::dyer_bi_lstm_builder{one2});
+
+            // std::shared_ptr<lstm::bi_lstm_builder> builder2
+            //     = std::make_shared<lstm::bi_lstm_builder>(lstm::bi_lstm_builder{});
+
+            if (ebt::in(std::string("dropout"), args)) {
+                std::cout << "unable to compute gradient when dropout is on" << std::endl;
+                exit(1);
+            }
+
+            if (ebt::in(std::string("subsampling"), args)) {
+                builder2 = std::make_shared<lstm::bi_lstm_input_subsampling>(
+                    lstm::bi_lstm_input_subsampling { builder2 });
+            }
+
+            nn2 = lstm::make_stacked_bi_lstm_nn(lstm_var_tree2, frame_ops2, *builder2);
+            if (ebt::in(std::string("logsoftmax"), args)) {
+                pred_nn2 = rnn::make_pred_nn(pred_var_tree2, nn2.layer.back().output);
+                feat_ops2 = pred_nn2.logprob;
+            } else {
+                feat_ops2 = nn2.layer.back().output;
+            }
+
+            fscrf::make_graph(s2, l_args2, feat_ops2.size());
+
+            auto frame_mat2 = autodiff::row_cat(feat_ops2);
+
+            autodiff::eval(frame_mat2, autodiff::eval_funcs);
+
+            s2.graph_data.weight_func = fscrf::make_weights(l_args2.features, var_tree2, frame_mat2);
+
+            fscrf::loss_func *loss_func2;
+
+            loss_func2 = new fscrf::marginal_log_loss { s2.graph_data, label_seq };
+
+            double ell2 = loss_func2->loss();
+
+            std::cout << "numeric grad: " << (ell2 - ell) / 1e-8 << std::endl;
+
+        }
+#endif
+
         std::shared_ptr<tensor_tree::vertex> param_grad = fscrf::make_tensor_tree(l_args.features);
         std::shared_ptr<tensor_tree::vertex> nn_param_grad;
         std::shared_ptr<tensor_tree::vertex> pred_grad;
 
-        nn_param_grad = lstm::make_stacked_bi_lstm_tensor_tree(l_args.layer);
+        lstm::stacked_bi_lstm_tensor_tree_factory fac { l_args.layer,
+            std::make_shared<lstm::bi_lstm_tensor_tree_factory>(
+                  lstm::bi_lstm_tensor_tree_factory {
+                      std::make_shared<lstm::dyer_lstm_tensor_tree_factory>(
+                          lstm::dyer_lstm_tensor_tree_factory{})
+                      // std::make_shared<lstm::lstm_tensor_tree_factory>(
+                      //     lstm::lstm_tensor_tree_factory{})
+                  }
+            )};
+        nn_param_grad = fac();
         pred_grad = nn::make_pred_tensor_tree();
 
         if (ell > 0) {
@@ -225,11 +319,11 @@ void learning_env::run()
 
             tensor_tree::copy_grad(param_grad, var_tree);
 
-            // auto& m = tensor_tree::get_matrix(param_grad->children[0]);
-            // std::cout << "analytic grad: " << m(l_args.label_id.at("sil") - 1, 0) << std::endl;
-
             autodiff::grad(frame_mat, autodiff::grad_funcs);
             tensor_tree::copy_grad(nn_param_grad, lstm_var_tree);
+
+            auto& v = tensor_tree::get_vector(param_grad->children[0]->children[8]);
+            std::cout << "analytic grad: " << v(0) << std::endl;
 
             if (ebt::in(std::string("logsoftmax"), args)) {
                 tensor_tree::copy_grad(pred_grad, pred_var_tree);
