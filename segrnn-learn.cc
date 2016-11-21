@@ -34,8 +34,8 @@ struct learning_env {
 int main(int argc, char *argv[])
 {
     ebt::ArgumentSpec spec {
-        "learn-first",
-        "Learn segmental CRF",
+        "segrnn-learn",
+        "Learn segmental RNN",
         {
             {"frame-batch", "", false},
             {"label-batch", "", true},
@@ -210,7 +210,12 @@ void learning_env::run()
 
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
-        s.graph_data.weight_func = fscrf::make_weights(l_args.features, var_tree, frame_mat);
+        if (dropout == 0.0) {
+            s.graph_data.weight_func = fscrf::make_weights(l_args.features, var_tree, frame_mat);
+        } else {
+            s.graph_data.weight_func = fscrf::make_weights(l_args.features, var_tree, frame_mat,
+                dropout, &l_args.gen);
+        }
 
         fscrf::loss_func *loss_func;
 

@@ -23,8 +23,8 @@ struct prediction_env {
 int main(int argc, char *argv[])
 {
     ebt::ArgumentSpec spec {
-        "learn-first",
-        "Learn segmental CRF",
+        "segrnn-predict",
+        "Predict with segmental RNN",
         {
             {"frame-batch", "", false},
             {"min-seg", "", false},
@@ -138,7 +138,12 @@ void prediction_env::run()
         auto frame_mat = autodiff::row_cat(feat_ops);
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
-        s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat);
+        if (dropout == 0.0) {
+            s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat);
+        } else {
+            s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat,
+                dropout, nullptr);
+        }
 
         fscrf::fscrf_data graph_path_data;
         graph_path_data.fst = scrf::shortest_path(s.graph_data);
