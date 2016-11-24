@@ -152,6 +152,7 @@ void learning_env::run()
         }
 
         std::cout << "sample: " << i + 1 << std::endl;
+        std::cout << "gold len: " << label_seq.size() << std::endl;
 
         autodiff::computation_graph comp_graph;
         std::shared_ptr<tensor_tree::vertex> var_tree
@@ -224,6 +225,7 @@ void learning_env::run()
         double ell = loss_func->loss();
 
         std::cout << "loss: " << ell << std::endl;
+        std::cout << "E: " << ell / label_seq.size() << std::endl;
 
 #if 0
         {

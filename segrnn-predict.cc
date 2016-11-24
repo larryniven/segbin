@@ -11,6 +11,7 @@ struct prediction_env {
     fscrf::inference_args i_args;
 
     double dropout;
+    int seed;
 
     std::unordered_map<std::string, std::string> args;
 
@@ -35,7 +36,8 @@ int main(int argc, char *argv[])
             {"label", "", true},
             {"dropout", "", false},
             {"subsampling", "", false},
-            {"logsoftmax", "", false}
+            {"logsoftmax", "", false},
+            {"seed", "", false},
         }
     };
 
@@ -65,8 +67,14 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
         frame_batch.open(args.at("frame-batch"));
     }
 
+    dropout = 0;
     if (ebt::in(std::string("dropout"), args)) {
         dropout = std::stod(args.at("dropout"));
+    }
+
+    seed = 0;
+    if (ebt::in(std::string("seed"), args)) {
+        seed = std::stoi(args.at("seed"));
     }
 
     fscrf::parse_inference_args(i_args, args);
@@ -79,6 +87,8 @@ void prediction_env::run()
     la::vector<double> one_vec;
     auto& m = tensor_tree::get_matrix(i_args.nn_param->children[0]->children[0]->children[0]);
     one_vec.resize(m.rows(), 1);
+
+    std::default_random_engine gen { seed };
 
     while (1) {
 
@@ -113,8 +123,8 @@ void prediction_env::run()
             = std::make_shared<lstm::dyer_bi_lstm_builder>(lstm::dyer_bi_lstm_builder{one});
 
         if (ebt::in(std::string("dropout"), args)) {
-            builder = std::make_shared<lstm::bi_lstm_input_scaling>(
-                lstm::bi_lstm_input_scaling { 1.0 - dropout, builder });
+            builder = std::make_shared<lstm::bi_lstm_input_dropout>(
+                lstm::bi_lstm_input_dropout { gen, dropout, builder });
         }
 
         if (ebt::in(std::string("subsampling"), args)) {
@@ -142,7 +152,7 @@ void prediction_env::run()
             s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat);
         } else {
             s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat,
-                dropout, nullptr);
+                dropout, &gen);
         }
 
         fscrf::fscrf_data graph_path_data;
