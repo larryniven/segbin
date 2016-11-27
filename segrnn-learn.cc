@@ -60,7 +60,8 @@ int main(int argc, char *argv[])
             {"dropout", "", false},
             {"seed", "", false},
             {"subsampling", "", false},
-            {"logsoftmax", "", false}
+            {"logsoftmax", "", false},
+            {"output-dropout", "", false}
         }
     };
 
