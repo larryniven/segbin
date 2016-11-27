@@ -100,7 +100,7 @@ void prediction_env::run()
         std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
 
         if (ebt::in(std::string("nn-param"), args)) {
-            std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(l_args);
+            std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(i_args);
             feat_ops = (*trans)(lstm_var_tree, frame_ops);
             pred_nn = rnn::make_pred_nn(pred_var_tree, feat_ops);
             feat_ops = pred_nn.logprob;

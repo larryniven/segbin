@@ -14,7 +14,8 @@ struct learning_env {
     std::shared_ptr<tensor_tree::vertex> param;
     std::shared_ptr<tensor_tree::vertex> opt_data;
 
-    int layer;
+    int outer_layer;
+    int inner_layer;
     std::shared_ptr<tensor_tree::vertex> nn_param;
     std::shared_ptr<tensor_tree::vertex> pred_param;
     std::shared_ptr<tensor_tree::vertex> nn_opt_data;
@@ -144,12 +145,12 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     tensor_tree::load_tensor(opt_data, args.at("opt-data"));
 
     if (ebt::in(std::string("nn-param"), args)) {
-        std::tie(layer, std::ignore, nn_param, pred_param)
+        std::tie(outer_layer, inner_layer, nn_param, pred_param)
             = fscrf::load_lstm_param(args.at("nn-param"));
     }
 
     if (ebt::in(std::string("nn-opt-data"), args)) {
-        std::tie(layer, std::ignore, nn_opt_data, pred_opt_data)
+        std::tie(outer_layer, inner_layer, nn_opt_data, pred_opt_data)
             = fscrf::load_lstm_param(args.at("nn-opt-data"));
     }
 
@@ -244,7 +245,8 @@ void learning_env::run()
             std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
 
             if (ebt::in(std::string("nn-param"), args)) {
-                std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(l_args);
+                std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(
+                    outer_layer, inner_layer, args, &gen);
                 feat_ops = (*trans)(lstm_var_tree, frame_ops);
                 pred_nn = rnn::make_pred_nn(pred_var_tree, feat_ops);
                 feat_ops = pred_nn.logprob;
@@ -279,7 +281,7 @@ void learning_env::run()
         std::shared_ptr<tensor_tree::vertex> pred_grad;
 
         if (ebt::in(std::string("nn-param"), args)) {
-            nn_param_grad = fscrf::make_lstm_tensor_tree(l_args.outer_layer, -1);
+            nn_param_grad = fscrf::make_lstm_tensor_tree(outer_layer, -1);
             pred_grad = nn::make_pred_tensor_tree();
         }
 

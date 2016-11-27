@@ -13,7 +13,8 @@ struct prediction_env {
     std::shared_ptr<tensor_tree::vertex> nn_param;
     std::shared_ptr<tensor_tree::vertex> pred_param;
 
-    int layer;
+    int outer_layer;
+    int inner_layer;
 
     std::vector<std::string> features;
 
@@ -77,7 +78,7 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
     tensor_tree::load_tensor(param, args.at("param"));
 
     if (ebt::in(std::string("nn-param"), args)) {
-        std::tie(layer, std::ignore, nn_param, pred_param)
+        std::tie(outer_layer, inner_layer, nn_param, pred_param)
             = fscrf::load_lstm_param(args.at("nn-param"));
     }
 
@@ -135,7 +136,8 @@ void prediction_env::run()
             std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
 
             if (ebt::in(std::string("nn-param"), args)) {
-                std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(l_args);
+                std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(
+                    outer_layer, inner_layer, args, nullptr);
                 feat_ops = (*trans)(lstm_var_tree, frame_ops);
                 pred_nn = rnn::make_pred_nn(pred_var_tree, feat_ops);
                 feat_ops = pred_nn.logprob;
