@@ -135,10 +135,6 @@ void learning_env::run()
 
     int i = 0;
 
-    la::vector<double> one_vec;
-    auto& m = tensor_tree::get_matrix(l_args.nn_param->children[0]->children[0]->children[0]);
-    one_vec.resize(m.rows(), 1);
-
     while (1) {
 
         fscrf::learning_sample s { l_args };
@@ -163,7 +159,6 @@ void learning_env::run()
         lstm_var_tree = make_var_tree(comp_graph, l_args.nn_param);
         pred_var_tree = make_var_tree(comp_graph, l_args.pred_param);
 
-        lstm::stacked_bi_lstm_nn_t nn;
         rnn::pred_nn_t pred_nn;
 
         std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
@@ -171,32 +166,13 @@ void learning_env::run()
             frame_ops.push_back(comp_graph.var(la::vector<double>(s.frames[i])));
         }
 
-        std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
+        std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(l_args);
 
-        std::shared_ptr<autodiff::op_t> one = comp_graph.var(one_vec);
+        std::vector<std::shared_ptr<autodiff::op_t>> feat_ops = (*trans)(lstm_var_tree, frame_ops);
 
-        std::shared_ptr<lstm::bi_lstm_builder> builder
-            = std::make_shared<lstm::dyer_bi_lstm_builder>(lstm::dyer_bi_lstm_builder{one});
-
-        // std::shared_ptr<lstm::bi_lstm_builder> builder
-        //     = std::make_shared<lstm::bi_lstm_builder>(lstm::bi_lstm_builder{});
-
-        if (ebt::in(std::string("dropout"), args)) {
-            builder = std::make_shared<lstm::bi_lstm_input_dropout>(
-                lstm::bi_lstm_input_dropout { l_args.gen, dropout, builder });
-        }
-
-        if (ebt::in(std::string("subsampling"), args)) {
-            builder = std::make_shared<lstm::bi_lstm_input_subsampling>(
-                lstm::bi_lstm_input_subsampling { builder });
-        }
-
-        nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, *builder);
         if (ebt::in(std::string("logsoftmax"), args)) {
-            pred_nn = rnn::make_pred_nn(pred_var_tree, nn.layer.back().output);
+            pred_nn = rnn::make_pred_nn(pred_var_tree, feat_ops);
             feat_ops = pred_nn.logprob;
-        } else {
-            feat_ops = nn.layer.back().output;
         }
 
         std::cout << "frames: " << s.frames.size() << " downsampled: " << feat_ops.size() << std::endl;
@@ -307,16 +283,7 @@ void learning_env::run()
         std::shared_ptr<tensor_tree::vertex> nn_param_grad;
         std::shared_ptr<tensor_tree::vertex> pred_grad;
 
-        lstm::stacked_bi_lstm_tensor_tree_factory fac { l_args.layer,
-            std::make_shared<lstm::bi_lstm_tensor_tree_factory>(
-                  lstm::bi_lstm_tensor_tree_factory {
-                      std::make_shared<lstm::dyer_lstm_tensor_tree_factory>(
-                          lstm::dyer_lstm_tensor_tree_factory{})
-                      // std::make_shared<lstm::lstm_tensor_tree_factory>(
-                      //     lstm::lstm_tensor_tree_factory{})
-                  }
-            )};
-        nn_param_grad = fac();
+        nn_param_grad = fscrf::make_lstm_tensor_tree(l_args.outer_layer, l_args.inner_layer);
         pred_grad = nn::make_pred_tensor_tree();
 
         if (ell > 0) {
@@ -366,7 +333,7 @@ void learning_env::run()
 
             // double v1 = tensor_tree::get_matrix(l_args.param->children[0])(l_args.label_id.at("sil") - 1, 0);
 
-            double w1 = tensor_tree::get_matrix(l_args.nn_param->children[0]->children[0]->children[0])(0, 0);
+            double w1 = tensor_tree::get_matrix(l_args.nn_param->children[0]->children[0]->children[0]->children[0])(0, 0);
 
             if (ebt::in(std::string("decay"), l_args.args)) {
                 tensor_tree::rmsprop_update(l_args.param, param_grad, l_args.opt_data,
@@ -409,7 +376,7 @@ void learning_env::run()
             // double v2 = tensor_tree::get_matrix(l_args.param->children[0])(l_args.label_id.at("sil") - 1, 0);
             // std::cout << "weight: " << v1 << " update: " << v2 - v1 << " ratio: " << (v2 - v1) / v1 << std::endl;
 
-            double w2 = tensor_tree::get_matrix(l_args.nn_param->children[0]->children[0]->children[0])(0, 0);
+            double w2 = tensor_tree::get_matrix(l_args.nn_param->children[0]->children[0]->children[0]->children[0])(0, 0);
             std::cout << "weight: " << w1 << " update: " << w2 - w1 << " ratio: " << (w2 - w1) / w1 << std::endl;
         }
 
@@ -434,10 +401,12 @@ void learning_env::run()
 
         if (i % save_every == 0) {
             tensor_tree::save_tensor(l_args.param, "param-last");
-            fscrf::save_lstm_param(l_args.nn_param, l_args.pred_param, "nn-param-last");
+            fscrf::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
+                l_args.nn_param, l_args.pred_param, "nn-param-last");
 
             tensor_tree::save_tensor(l_args.opt_data, "opt-data-last");
-            fscrf::save_lstm_param(l_args.nn_opt_data, l_args.pred_opt_data, "nn-opt-data-last");
+            fscrf::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
+               l_args.nn_opt_data, l_args.pred_opt_data, "nn-opt-data-last");
         }
 
         delete loss_func;
@@ -451,10 +420,12 @@ void learning_env::run()
     }
 
     tensor_tree::save_tensor(l_args.param, output_param);
-    fscrf::save_lstm_param(l_args.nn_param, l_args.pred_param, output_nn_param);
+    fscrf::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
+        l_args.nn_param, l_args.pred_param, output_nn_param);
 
     tensor_tree::save_tensor(l_args.opt_data, output_opt_data);
-    fscrf::save_lstm_param(l_args.nn_opt_data, l_args.pred_opt_data, output_nn_opt_data);
+    fscrf::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
+        l_args.nn_opt_data, l_args.pred_opt_data, output_nn_opt_data);
 
 }
 

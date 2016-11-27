@@ -67,28 +67,12 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
         frame_batch.open(args.at("frame-batch"));
     }
 
-    dropout = 0;
-    if (ebt::in(std::string("dropout"), args)) {
-        dropout = std::stod(args.at("dropout"));
-    }
-
-    seed = 0;
-    if (ebt::in(std::string("seed"), args)) {
-        seed = std::stoi(args.at("seed"));
-    }
-
     fscrf::parse_inference_args(i_args, args);
 }
 
 void prediction_env::run()
 {
     int i = 1;
-
-    la::vector<double> one_vec;
-    auto& m = tensor_tree::get_matrix(i_args.nn_param->children[0]->children[0]->children[0]);
-    one_vec.resize(m.rows(), 1);
-
-    std::default_random_engine gen { seed };
 
     while (1) {
 
@@ -109,7 +93,6 @@ void prediction_env::run()
         lstm_var_tree = make_var_tree(comp_graph, i_args.nn_param);
         pred_var_tree = make_var_tree(comp_graph, i_args.pred_param);
 
-        lstm::stacked_bi_lstm_nn_t nn;
         rnn::pred_nn_t pred_nn;
 
         std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
@@ -117,30 +100,13 @@ void prediction_env::run()
             frame_ops.push_back(comp_graph.var(la::vector<double>(s.frames[i])));
         }
 
-        std::shared_ptr<autodiff::op_t> one = comp_graph.var(one_vec);
+        std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(i_args);
 
-        std::shared_ptr<lstm::bi_lstm_builder> builder
-            = std::make_shared<lstm::dyer_bi_lstm_builder>(lstm::dyer_bi_lstm_builder{one});
-
-        if (ebt::in(std::string("dropout"), args)) {
-            builder = std::make_shared<lstm::bi_lstm_input_dropout>(
-                lstm::bi_lstm_input_dropout { gen, dropout, builder });
-        }
-
-        if (ebt::in(std::string("subsampling"), args)) {
-            builder = std::make_shared<lstm::bi_lstm_input_subsampling>(
-                lstm::bi_lstm_input_subsampling { builder });
-        }
-
-        std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
-
-        nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, *builder);
+        std::vector<std::shared_ptr<autodiff::op_t>> feat_ops = (*trans)(lstm_var_tree, frame_ops);
 
         if (ebt::in(std::string("logsoftmax"), args)) {
-            pred_nn = rnn::make_pred_nn(pred_var_tree, nn.layer.back().output);
+            pred_nn = rnn::make_pred_nn(pred_var_tree, feat_ops);
             feat_ops = pred_nn.logprob;
-        } else {
-            feat_ops = nn.layer.back().output;
         }
 
         fscrf::make_graph(s, i_args, feat_ops.size());
@@ -148,11 +114,11 @@ void prediction_env::run()
         auto frame_mat = autodiff::row_cat(feat_ops);
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
-        if (dropout == 0.0) {
-            s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat);
-        } else {
+        if (ebt::in(std::string("dropout"), i_args.args)) {
             s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat,
-                dropout, &gen);
+                std::stod(i_args.args.at("dropout")), &i_args.gen);
+        } else {
+            s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat);
         }
 
         fscrf::fscrf_data graph_path_data;
