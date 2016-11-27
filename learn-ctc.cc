@@ -2,6 +2,7 @@
 #include <fstream>
 #include "seg/ctc.h"
 #include "seg/util.h"
+#include "nn/lstm-tensor-tree.h"
 #include "speech/speech.h"
 #include "autodiff/autodiff.h"
 

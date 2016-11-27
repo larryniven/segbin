@@ -14,7 +14,6 @@ struct prediction_env {
     std::shared_ptr<tensor_tree::vertex> pred_param;
 
     int layer;
-    double dropout_scale;
 
     std::vector<std::string> features;
 
@@ -41,7 +40,6 @@ int main(int argc, char *argv[])
             {"nn-param", "", false},
             {"features", "", true},
             {"label", "", true},
-            {"dropout-scale", "", false}
         }
     };
 
@@ -79,13 +77,8 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
     tensor_tree::load_tensor(param, args.at("param"));
 
     if (ebt::in(std::string("nn-param"), args)) {
-        std::tie(layer, nn_param, pred_param)
+        std::tie(layer, std::ignore, nn_param, pred_param)
             = fscrf::load_lstm_param(args.at("nn-param"));
-    }
-
-    dropout_scale = 0;
-    if (ebt::in(std::string("dropout-scale"), args)) {
-        dropout_scale = std::stod(args.at("dropout-scale"));
     }
 
     label_id = util::load_label_id(args.at("label"));
@@ -142,14 +135,9 @@ void prediction_env::run()
             std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
 
             if (ebt::in(std::string("nn-param"), args)) {
-                if (ebt::in(std::string("dropout-scale"), args)) {
-                    lstm::bi_lstm_input_scaling builder { dropout_scale,
-                        std::make_shared<lstm::bi_lstm_builder>(lstm::bi_lstm_builder{}) };
-                    nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, builder);
-                } else { 
-                    nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, lstm::bi_lstm_builder{});
-                }
-                pred_nn = rnn::make_pred_nn(pred_var_tree, nn.layer.back().output);
+                std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(l_args);
+                feat_ops = (*trans)(lstm_var_tree, frame_ops);
+                pred_nn = rnn::make_pred_nn(pred_var_tree, feat_ops);
                 feat_ops = pred_nn.logprob;
             } else {
                 feat_ops = frame_ops;

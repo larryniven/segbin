@@ -28,7 +28,6 @@ int main(int argc, char *argv[])
             {"frame-batch", "", true},
             {"param", "", true},
             {"label", "", true},
-            {"dropout", "", false},
             {"log-prob", "", false},
             {"frame-pred", "", false}
         }
@@ -90,13 +89,7 @@ void prediction_env::run()
             frame_ops.push_back(comp_graph.var(la::vector<double>(f)));
         }
 
-        if (ebt::in(std::string("dropout"), args)) {
-            lstm::bi_lstm_input_scaling builder { i_args.dropout,
-                std::make_shared<lstm::bi_lstm_builder>(lstm::bi_lstm_builder{}) };
-            nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, builder);
-        } else {
-            nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, lstm::bi_lstm_builder{});
-        }
+        nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, lstm::bi_lstm_builder{});
 
         pred_nn = rnn::make_pred_nn(pred_var_tree, nn.layer.back().output);
 

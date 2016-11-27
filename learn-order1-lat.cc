@@ -2,6 +2,7 @@
 #include "seg/loss.h"
 #include "seg/scrf_weight.h"
 #include "seg/util.h"
+#include "nn/lstm-tensor-tree.h"
 #include <fstream>
 
 struct learning_env {
@@ -36,7 +37,6 @@ struct learning_env {
     double cost_scale;
 
     double dropout;
-    double dropout_scale;
 
     int seed;
 
@@ -77,7 +77,6 @@ int main(int argc, char *argv[])
             {"loss", "", true},
             {"cost-scale", "", false},
             {"dropout", "", false},
-            {"dropout-scale", "", false},
             {"seed", "", false},
             {"label", "", true},
         }
@@ -145,12 +144,12 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     tensor_tree::load_tensor(opt_data, args.at("opt-data"));
 
     if (ebt::in(std::string("nn-param"), args)) {
-        std::tie(layer, nn_param, pred_param)
+        std::tie(layer, std::ignore, nn_param, pred_param)
             = fscrf::load_lstm_param(args.at("nn-param"));
     }
 
     if (ebt::in(std::string("nn-opt-data"), args)) {
-        std::tie(layer, nn_opt_data, pred_opt_data)
+        std::tie(layer, std::ignore, nn_opt_data, pred_opt_data)
             = fscrf::load_lstm_param(args.at("nn-opt-data"));
     }
 
@@ -184,11 +183,6 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     dropout = 0;
     if (ebt::in(std::string("dropout"), args)) {
         dropout = std::stod(args.at("dropout"));
-    }
-
-    dropout_scale = 0;
-    if (ebt::in(std::string("dropout-scale"), args)) {
-        dropout_scale = std::stod(args.at("dropout-scale"));
     }
 
     seed = 0;
@@ -250,18 +244,9 @@ void learning_env::run()
             std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
 
             if (ebt::in(std::string("nn-param"), args)) {
-                if (ebt::in(std::string("dropout-scale"), args)) {
-                    lstm::bi_lstm_input_scaling builder { dropout_scale,
-                        std::make_shared<lstm::bi_lstm_builder>(lstm::bi_lstm_builder{}) };
-                    nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, builder);
-                } else if (ebt::in(std::string("dropout"), args)) {
-                    lstm::bi_lstm_input_dropout builder { gen, dropout,
-                        std::make_shared<lstm::bi_lstm_builder>(lstm::bi_lstm_builder{}) };
-                    nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, builder);
-                } else { 
-                    nn = lstm::make_stacked_bi_lstm_nn(lstm_var_tree, frame_ops, lstm::bi_lstm_builder{});
-                }
-                pred_nn = rnn::make_pred_nn(pred_var_tree, nn.layer.back().output);
+                std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(l_args);
+                feat_ops = (*trans)(lstm_var_tree, frame_ops);
+                pred_nn = rnn::make_pred_nn(pred_var_tree, feat_ops);
                 feat_ops = pred_nn.logprob;
             } else {
                 feat_ops = frame_ops;
@@ -294,7 +279,7 @@ void learning_env::run()
         std::shared_ptr<tensor_tree::vertex> pred_grad;
 
         if (ebt::in(std::string("nn-param"), args)) {
-            nn_param_grad = lstm::make_stacked_bi_lstm_tensor_tree(layer);
+            nn_param_grad = fscrf::make_lstm_tensor_tree(l_args.outer_layer, -1);
             pred_grad = nn::make_pred_tensor_tree();
         }
 

@@ -8,14 +8,12 @@ bin = \
     learn-order1-full \
     predict-order1-full \
     prune-order1-full \
-    loss-order1-full \
     learn-order1-lat \
     predict-order1-lat \
     forced-align-order1-full \
     prune-random \
     learn-order2-lat \
     predict-order2-lat \
-    loss-order2-lat \
     overlap-vs-per \
     segrnn-learn \
     segrnn-predict
@@ -52,9 +50,6 @@ predict-order1-full: predict-order1-full.o
 prune-order1-full: prune-order1-full.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
-loss-order1-full: loss-order1-full.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
-
 forced-align-order1-full: forced-align-order1-full.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
@@ -71,9 +66,6 @@ learn-order2-lat: learn-order2-lat.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 predict-order2-lat: predict-order2-lat.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
-
-loss-order2-lat: loss-order2-lat.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 overlap-vs-per: overlap-vs-per.o
