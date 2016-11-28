@@ -6,8 +6,8 @@
 
 struct learning_env {
 
-    std::ifstream frame_batch;
-    std::ifstream label_batch;
+    util::batch_indices frame_batch;
+    util::batch_indices label_batch;
 
     int save_every;
 
@@ -61,7 +61,8 @@ int main(int argc, char *argv[])
             {"seed", "", false},
             {"subsampling", "", false},
             {"logsoftmax", "", false},
-            {"output-dropout", "", false}
+            {"output-dropout", "", false},
+            {"shuffle", "", false}
         }
     };
 
@@ -87,10 +88,7 @@ int main(int argc, char *argv[])
 learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     : args(args)
 {
-    if (ebt::in(std::string("frame-batch"), args)) {
-        frame_batch.open(args.at("frame-batch"));
-    }
-
+    frame_batch.open(args.at("frame-batch"));
     label_batch.open(args.at("label-batch"));
 
     save_every = std::numeric_limits<int>::max();
@@ -128,27 +126,47 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     }
 
     fscrf::parse_learning_args(l_args, args);
+
+    if (ebt::in(std::string("shuffle"), args)) {
+        std::vector<int> indices;
+        indices.resize(frame_batch.pos.size());
+
+        for (int i = 0; i < indices.size(); ++i) {
+            indices[i] = i;
+        }
+        std::shuffle(indices.begin(), indices.end(), l_args.gen);
+
+        std::vector<unsigned long> pos = frame_batch.pos;
+        for (int i = 0; i < indices.size(); ++i) {
+            frame_batch.pos[i] = pos[indices[i]];
+        }
+
+        pos = label_batch.pos;
+        for (int i = 0; i < indices.size(); ++i) {
+            label_batch.pos[i] = pos[indices[i]];
+        }
+    }
 }
 
 void learning_env::run()
 {
     ebt::Timer timer;
 
-    int i = 0;
+    int nsample = 0;
 
     while (1) {
 
         fscrf::learning_sample s { l_args };
 
-        s.frames = speech::load_frame_batch(frame_batch);
+        s.frames = speech::load_frame_batch(frame_batch.at(nsample));
 
-        std::vector<int> label_seq = util::load_label_seq(label_batch, l_args.label_id);
+        std::vector<int> label_seq = util::load_label_seq(label_batch.at(nsample), l_args.label_id);
 
-        if (!label_batch) {
+        if (!label_batch.stream) {
             break;
         }
 
-        std::cout << "sample: " << i + 1 << std::endl;
+        std::cout << "sample: " << nsample + 1 << std::endl;
         std::cout << "gold len: " << label_seq.size() << std::endl;
 
         autodiff::computation_graph comp_graph;
@@ -398,9 +416,9 @@ void learning_env::run()
 
         std::cout << std::endl;
 
-        ++i;
+        ++nsample;
 
-        if (i % save_every == 0) {
+        if (nsample % save_every == 0) {
             tensor_tree::save_tensor(l_args.param, "param-last");
             fscrf::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
                 l_args.nn_param, l_args.pred_param, "nn-param-last");
