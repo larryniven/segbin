@@ -154,17 +154,13 @@ void learning_env::run()
 
     int nsample = 0;
 
-    while (1) {
+    while (nsample < frame_batch.pos.size()) {
 
         fscrf::learning_sample s { l_args };
 
         s.frames = speech::load_frame_batch(frame_batch.at(nsample));
 
         std::vector<int> label_seq = util::load_label_seq(label_batch.at(nsample), l_args.label_id);
-
-        if (!label_batch.stream) {
-            break;
-        }
 
         std::cout << "sample: " << nsample + 1 << std::endl;
         std::cout << "gold len: " << label_seq.size() << std::endl;
