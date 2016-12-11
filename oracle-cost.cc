@@ -1,4 +1,3 @@
-#include "seg/loss.h"
 #include "seg/scrf_weight.h"
 #include "seg/util.h"
 #include "seg/fscrf.h"

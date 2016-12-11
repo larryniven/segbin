@@ -3,7 +3,7 @@
 #include "seg/util.h"
 #include <fstream>
 
-struct pruning_env {
+struct prediction_env {
 
     std::ifstream frame_batch;
 
@@ -15,7 +15,7 @@ struct pruning_env {
 
     std::unordered_map<std::string, std::string> args;
 
-    pruning_env(std::unordered_map<std::string, std::string> args);
+    prediction_env(std::unordered_map<std::string, std::string> args);
 
     void run();
 
@@ -24,17 +24,19 @@ struct pruning_env {
 int main(int argc, char *argv[])
 {
     ebt::ArgumentSpec spec {
-        "prune-order1-full",
-        "Prune with segmental CRF",
+        "segrnn-predict",
+        "Predict with segmental RNN",
         {
             {"frame-batch", "", false},
             {"min-seg", "", false},
             {"max-seg", "", false},
             {"param", "", true},
-            {"nn-param", "", false},
+            {"nn-param", "", true},
             {"features", "", true},
             {"label", "", true},
-            {"alpha", "", true},
+            {"subsampling", "", false},
+            {"logsoftmax", "", false},
+            {"alpha", "", false},
             {"output", "", true}
         }
     };
@@ -51,14 +53,14 @@ int main(int argc, char *argv[])
     }
     std::cout << std::endl;
 
-    pruning_env env { args };
+    prediction_env env { args };
 
     env.run();
 
     return 0;
 }
 
-pruning_env::pruning_env(std::unordered_map<std::string, std::string> args)
+prediction_env::prediction_env(std::unordered_map<std::string, std::string> args)
     : args(args)
 {
     if (ebt::in(std::string("frame-batch"), args)) {
@@ -72,9 +74,9 @@ pruning_env::pruning_env(std::unordered_map<std::string, std::string> args)
     fscrf::parse_inference_args(i_args, args);
 }
 
-void pruning_env::run()
+void prediction_env::run()
 {
-    int i = 1;
+    int nsample = 1;
 
     while (1) {
 
@@ -86,20 +88,15 @@ void pruning_env::run()
             break;
         }
 
-        fscrf::make_graph(s, i_args);
-
         autodiff::computation_graph comp_graph;
         std::shared_ptr<tensor_tree::vertex> var_tree
             = tensor_tree::make_var_tree(comp_graph, i_args.param);
 
         std::shared_ptr<tensor_tree::vertex> lstm_var_tree;
         std::shared_ptr<tensor_tree::vertex> pred_var_tree;
-        if (ebt::in(std::string("nn-param"), args)) {
-            lstm_var_tree = make_var_tree(comp_graph, i_args.nn_param);
-            pred_var_tree = make_var_tree(comp_graph, i_args.pred_param);
-        }
+        lstm_var_tree = make_var_tree(comp_graph, i_args.nn_param);
+        pred_var_tree = make_var_tree(comp_graph, i_args.pred_param);
 
-        lstm::stacked_bi_lstm_nn_t nn;
         rnn::pred_nn_t pred_nn;
 
         std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
@@ -107,29 +104,28 @@ void pruning_env::run()
             frame_ops.push_back(comp_graph.var(la::vector<double>(s.frames[i])));
         }
 
-        std::vector<std::shared_ptr<autodiff::op_t>> feat_ops;
+        std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(i_args);
 
-        if (ebt::in(std::string("nn-param"), args)) {
-            std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(i_args);
-            feat_ops = (*trans)(lstm_var_tree, frame_ops);
+        std::vector<std::shared_ptr<autodiff::op_t>> feat_ops = (*trans)(lstm_var_tree, frame_ops);
+
+        if (ebt::in(std::string("logsoftmax"), args)) {
             pred_nn = rnn::make_pred_nn(pred_var_tree, feat_ops);
             feat_ops = pred_nn.logprob;
-        } else {
-            feat_ops = frame_ops;
         }
+
+        fscrf::make_graph(s, i_args, feat_ops.size());
 
         auto frame_mat = autodiff::row_cat(feat_ops);
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
-        std::shared_ptr<scrf::composite_weight<ilat::fst>> weight_func
-            = fscrf::make_weights(i_args.features, var_tree, frame_mat);
-        s.graph_data.weight_func = std::make_shared<
-            scrf::cached_weight<ilat::fst>>(
-            scrf::cached_weight<ilat::fst> { weight_func });
+        if (ebt::in(std::string("dropout"), i_args.args)) {
+            s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat,
+                std::stod(i_args.args.at("dropout")), &i_args.gen);
+        } else {
+            s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat);
+        }
 
         fscrf::fscrf_fst graph { s.graph_data };
-        s.graph_data.topo_order = std::make_shared<std::vector<int>>(
-            fst::topo_order(graph));
 
         fst::forward_one_best<fscrf::fscrf_fst> forward;
         for (auto v: graph.initials()) {
@@ -205,7 +201,7 @@ void pruning_env::run()
 
         double threshold = alpha * max + (1 - alpha) * sum / edge_count;
 
-        std::cout << "sample: " << i << std::endl;
+        std::cout << "sample: " << nsample << std::endl;
         std::cout << "frames: " << s.frames.size() << std::endl;
         std::cout << "max: " << max << " avg: " << sum / edge_count
             << " alpha: " << alpha << " threshold: " << threshold << std::endl;
@@ -264,7 +260,7 @@ void pruning_env::run()
             }
         }
 
-        output << i << ".lat" << std::endl;
+        output << nsample << ".lat" << std::endl;
 
         ilat::fst f;
         f.data = std::make_shared<ilat::fst_data>(data);
@@ -291,7 +287,7 @@ void pruning_env::run()
 
         std::cout << std::endl;
 
-        ++i;
+        ++nsample;
     }
 }
 

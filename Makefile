@@ -16,7 +16,8 @@ bin = \
     predict-order2-lat \
     overlap-vs-per \
     segrnn-learn \
-    segrnn-predict
+    segrnn-predict \
+    segrnn-prune
 
 .PHONY: all clean
 
@@ -75,5 +76,14 @@ segrnn-learn: segrnn-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-predict: segrnn-predict.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+segrnn-prune: segrnn-prune.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+segrnn-cascade-learn: segrnn-cascade-learn.o cascade.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+segrnn-cascade-predict: segrnn-cascade-predict.o cascade.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 

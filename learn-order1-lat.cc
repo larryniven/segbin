@@ -1,5 +1,4 @@
 #include "seg/fscrf.h"
-#include "seg/loss.h"
 #include "seg/scrf_weight.h"
 #include "seg/util.h"
 #include "nn/lstm-tensor-tree.h"
