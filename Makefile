@@ -18,6 +18,7 @@ bin = \
     segrnn-learn \
     segrnn-predict \
     segrnn-prune \
+    segrnn-aling \
     segrnn-cascade-learn \
     segrnn-cascade-predict
 
@@ -81,6 +82,9 @@ segrnn-predict: segrnn-predict.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-prune: segrnn-prune.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+segrnn-align: segrnn-align.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-cascade-learn: segrnn-cascade-learn.o cascade.o

@@ -31,7 +31,7 @@ int main(int argc, char *argv[])
             {"min-seg", "", false},
             {"max-seg", "", false},
             {"param", "", true},
-            {"nn-param", "", true},
+            {"nn-param", "", false},
             {"features", "", true},
             {"label", "", true},
             {"subsampling", "", false},
@@ -92,38 +92,32 @@ void prediction_env::run()
         std::shared_ptr<tensor_tree::vertex> var_tree
             = tensor_tree::make_var_tree(comp_graph, i_args.param);
 
-        std::shared_ptr<tensor_tree::vertex> lstm_var_tree;
-        std::shared_ptr<tensor_tree::vertex> pred_var_tree;
-        lstm_var_tree = make_var_tree(comp_graph, i_args.nn_param);
-        pred_var_tree = make_var_tree(comp_graph, i_args.pred_param);
-
-        rnn::pred_nn_t pred_nn;
+        std::shared_ptr<tensor_tree::vertex> lstm_var_tree = make_var_tree(comp_graph, i_args.nn_param);
 
         std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
         for (int i = 0; i < s.frames.size(); ++i) {
-            frame_ops.push_back(comp_graph.var(la::vector<double>(s.frames[i])));
+            frame_ops.push_back(comp_graph.var(la::tensor<double>(la::vector<double>(s.frames[i]))));
         }
 
-        std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(i_args);
+        if (ebt::in(std::string("nn-param"), args)) {
+            std::shared_ptr<lstm::transcriber> trans
+                = fscrf::make_transcriber(i_args);
 
-        std::vector<std::shared_ptr<autodiff::op_t>> feat_ops = (*trans)(lstm_var_tree, frame_ops);
-
-        if (ebt::in(std::string("logsoftmax"), args)) {
-            pred_nn = rnn::make_pred_nn(pred_var_tree, feat_ops);
-            feat_ops = pred_nn.logprob;
+            if (ebt::in(std::string("logsoftmax"), args)) {
+                trans = std::make_shared<lstm::logsoftmax_transcriber>(
+                    lstm::logsoftmax_transcriber { trans });
+                frame_ops = (*trans)(lstm_var_tree, frame_ops);
+            } else {
+                frame_ops = (*trans)(lstm_var_tree->children[0], frame_ops);
+            }
         }
 
-        fscrf::make_graph(s, i_args, feat_ops.size());
+        fscrf::make_graph(s, i_args, frame_ops.size());
 
-        auto frame_mat = autodiff::row_cat(feat_ops);
+        auto frame_mat = autodiff::row_cat(frame_ops);
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
-        if (ebt::in(std::string("dropout"), i_args.args)) {
-            s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat,
-                std::stod(i_args.args.at("dropout")), &i_args.gen);
-        } else {
-            s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat);
-        }
+        s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat);
 
         fscrf::fscrf_fst graph { s.graph_data };
 

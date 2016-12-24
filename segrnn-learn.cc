@@ -180,9 +180,10 @@ void learning_env::run()
             if (ebt::in(std::string("logsoftmax"), args)) {
                 trans = std::make_shared<lstm::logsoftmax_transcriber>(
                     lstm::logsoftmax_transcriber { trans });
+                frame_ops = (*trans)(lstm_var_tree, frame_ops);
+            } else {
+                frame_ops = (*trans)(lstm_var_tree->children[0], frame_ops);
             }
-
-            frame_ops = (*trans)(lstm_var_tree->children[0], frame_ops);
         }
 
         std::cout << "frames: " << s.frames.size() << " downsampled: " << frame_ops.size() << std::endl;
