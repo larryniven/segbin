@@ -17,7 +17,9 @@ bin = \
     overlap-vs-per \
     segrnn-learn \
     segrnn-predict \
-    segrnn-prune
+    segrnn-prune \
+    segrnn-cascade-learn \
+    segrnn-cascade-predict
 
 .PHONY: all clean
 
