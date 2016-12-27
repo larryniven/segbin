@@ -6,6 +6,7 @@
 struct prediction_env {
 
     std::ifstream frame_batch;
+    std::ifstream label_batch;
 
     fscrf::inference_args i_args;
 
@@ -25,9 +26,10 @@ int main(int argc, char *argv[])
 {
     ebt::ArgumentSpec spec {
         "segrnn-predict",
-        "Predict with segmental RNN",
+        "Prune with segmental RNN",
         {
             {"frame-batch", "", false},
+            {"label-batch", "", false},
             {"min-seg", "", false},
             {"max-seg", "", false},
             {"param", "", true},
@@ -37,7 +39,8 @@ int main(int argc, char *argv[])
             {"subsampling", "", false},
             {"logsoftmax", "", false},
             {"alpha", "", false},
-            {"output", "", true}
+            {"output", "", true},
+            {"include-alignment", "", false}
         }
     };
 
@@ -67,6 +70,10 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
         frame_batch.open(args.at("frame-batch"));
     }
 
+    if (ebt::in(std::string("label-batch"), args)) {
+        label_batch.open(args.at("label-batch"));
+    }
+
     alpha = std::stod(args.at("alpha"));
 
     output.open(args.at("output"));
@@ -83,6 +90,12 @@ void prediction_env::run()
         fscrf::sample s { i_args };
 
         s.frames = speech::load_frame_batch(frame_batch);
+
+        std::vector<std::string> label_seq;
+
+        if (ebt::in(std::string("label-batch"), args)) {
+            label_seq = util::load_label_seq(label_batch);
+        }
 
         if (!frame_batch) {
             break;
@@ -201,8 +214,6 @@ void prediction_env::run()
             << " alpha: " << alpha << " threshold: " << threshold << std::endl;
         std::cout << "forward: " << f_max << " backward: " << b_max << std::endl;
 
-        std::unordered_map<int, int> vertex_map;
-
         std::vector<int> stack;
         std::unordered_set<int> traversed;
 
@@ -211,9 +222,7 @@ void prediction_env::run()
             traversed.insert(v);
         }
 
-        ilat::fst_data data;
-        data.symbol_id = std::make_shared<std::unordered_map<std::string, int>>(i_args.label_id);
-        data.id_symbol = std::make_shared<std::vector<std::string>>(i_args.id_label);
+        std::unordered_set<int> retained_edges;
 
         while (stack.size() > 0) {
             auto u = stack.back();
@@ -227,23 +236,7 @@ void prediction_env::run()
 
                 if (fb_alpha(tail) + weight + fb_beta(head) > threshold) {
 
-                    if (!ebt::in(tail, vertex_map)) {
-                        int v = vertex_map.size();
-                        vertex_map[tail] = v;
-                        ilat::add_vertex(data, v, ilat::vertex_data { graph.time(tail) });
-                    }
-
-                    if (!ebt::in(head, vertex_map)) {
-                        int v = vertex_map.size();
-                        vertex_map[head] = v;
-                        ilat::add_vertex(data, v, ilat::vertex_data { graph.time(head) });
-                    }
-
-                    int tail_new = vertex_map.at(tail);
-                    int head_new = vertex_map.at(head);
-                    int e_new = data.edges.size();
-                    ilat::add_edge(data, e_new, ilat::edge_data { tail_new, head_new, weight,
-                        graph.input(e), graph.output(e) });
+                    retained_edges.insert(e);
 
                     if (!ebt::in(head, traversed)) {
                         stack.push_back(head);
@@ -254,14 +247,84 @@ void prediction_env::run()
             }
         }
 
+        if (ebt::in(std::string("include-alignment"), args)) {
+            std::vector<int> label_seq_id;
+            for (auto& s: label_seq) {
+                label_seq_id.push_back(i_args.label_id.at(s));
+            }
+
+            ilat::fst label_fst = fscrf::make_label_fst(label_seq_id, i_args.label_id, i_args.id_label);
+
+            ilat::fst& graph_fst = *s.graph_data.fst;
+
+            ilat::lazy_pair_mode1 composed_fst { label_fst, graph_fst };
+
+            fscrf::fscrf_pair_data pair_data;
+            pair_data.fst = std::make_shared<ilat::lazy_pair_mode1>(composed_fst);
+            pair_data.weight_func = std::make_shared<fscrf::mode2_weight>(
+                fscrf::mode2_weight { s.graph_data.weight_func });
+            pair_data.topo_order = std::make_shared<std::vector<std::tuple<int, int>>>(
+                fst::topo_order(composed_fst));
+
+            fscrf::fscrf_pair_fst pair { pair_data };
+
+            fst::forward_one_best<fscrf::fscrf_pair_fst> one_best;
+            for (auto& i: composed_fst.initials()) {
+                one_best.extra[i] = fst::forward_one_best<fscrf::fscrf_pair_fst>::extra_data
+                    { std::make_tuple(-1, -1), 0 };
+            }
+            one_best.merge(pair, *pair_data.topo_order);
+
+            std::vector<std::tuple<int, int>> aligned_edges = one_best.best_path(pair);
+
+            for (auto& e: aligned_edges) {
+                retained_edges.insert(std::get<1>(e));
+            }
+        }
+
+        ilat::fst_data data;
+        data.symbol_id = std::make_shared<std::unordered_map<std::string, int>>(i_args.label_id);
+        data.id_symbol = std::make_shared<std::vector<std::string>>(i_args.id_label);
+
+        std::unordered_map<int, int> vertex_map;
+
+        for (auto& e: retained_edges) {
+            int tail = graph.tail(e);
+            int head = graph.head(e);
+            double weight = graph.weight(e);
+
+            if (!ebt::in(tail, vertex_map)) {
+                int v = vertex_map.size();
+                vertex_map[tail] = v;
+                ilat::add_vertex(data, v, ilat::vertex_data { graph.time(tail) });
+            }
+
+            if (!ebt::in(head, vertex_map)) {
+                int v = vertex_map.size();
+                vertex_map[head] = v;
+                ilat::add_vertex(data, v, ilat::vertex_data { graph.time(head) });
+            }
+
+            int tail_new = vertex_map.at(tail);
+            int head_new = vertex_map.at(head);
+            int e_new = data.edges.size();
+            ilat::add_edge(data, e_new, ilat::edge_data { tail_new, head_new, weight,
+                graph.input(e), graph.output(e) });
+        }
+
         output << nsample << ".lat" << std::endl;
 
         ilat::fst f;
         f.data = std::make_shared<ilat::fst_data>(data);
 
         for (int i = 0; i < f.vertices().size(); ++i) {
-            output << i << " "
-                << "time=" << f.time(i) << std::endl;
+            if (ebt::in(std::string("subsampling"), args)) {
+                output << i << " "
+                    << "time=" << f.time(i) * 4 << std::endl;
+            } else {
+                output << i << " "
+                    << "time=" << f.time(i) << std::endl;
+            }
         }
 
         output << "#" << std::endl;

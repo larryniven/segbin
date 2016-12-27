@@ -165,6 +165,11 @@ void alignment_env::run()
                 int tail_time = graph.time(graph.tail(std::get<1>(e)));
                 int head_time = graph.time(graph.head(std::get<1>(e)));
 
+                if (ebt::in(std::string("subsampling"), args)) {
+                    tail_time *= 4;
+                    head_time *= 4;
+                }
+
                 std::cout << tail_time << " " << head_time << " " << l_args.id_label.at(pair.output(e)) << std::endl;
             }
             std::cout << "." << std::endl;
