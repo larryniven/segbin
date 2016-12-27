@@ -18,7 +18,7 @@ bin = \
     segrnn-learn \
     segrnn-predict \
     segrnn-prune \
-    segrnn-aling \
+    segrnn-align \
     segrnn-cascade-learn \
     segrnn-cascade-predict
 
