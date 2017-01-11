@@ -29,7 +29,7 @@ struct inference_env {
 int main(int argc, char *argv[])
 {
     ebt::ArgumentSpec spec {
-        "predict-order2-lat",
+        "lat-order2-predict",
         "Decode with segmental CRF",
         {
             {"frame-batch", "", false},
@@ -93,9 +93,7 @@ inference_env::inference_env(std::unordered_map<std::string, std::string> args)
 
 void inference_env::run()
 {
-    ebt::Timer timer;
-
-    int i = 0;
+    int nsample = 0;
 
     while (1) {
 
@@ -134,10 +132,10 @@ void inference_env::run()
         }
         std::cout << "(" << lat.data->name << ".dot)" << std::endl;
 
-        ++i;
+        ++nsample;
 
 #if DEBUG_TOP
-        if (i == DEBUG_TOP) {
+        if (nsample == DEBUG_TOP) {
             break;
         }
 #endif

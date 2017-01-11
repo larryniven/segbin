@@ -1,13 +1,13 @@
-#include "seg/fscrf.h"
-#include "seg/scrf_weight.h"
-#include "seg/util.h"
+#include "seg/seg-util.h"
+#include "speech/speech.h"
+#include "fst/fst-algo.h"
 #include <fstream>
 
 struct prediction_env {
 
     std::ifstream frame_batch;
 
-    fscrf::inference_args i_args;
+    seg::inference_args i_args;
 
     std::unordered_map<std::string, std::string> args;
 
@@ -61,7 +61,7 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
         frame_batch.open(args.at("frame-batch"));
     }
 
-    fscrf::parse_inference_args(i_args, args);
+    seg::parse_inference_args(i_args, args);
 }
 
 void prediction_env::run()
@@ -70,7 +70,7 @@ void prediction_env::run()
 
     while (1) {
 
-        fscrf::sample s { i_args };
+        seg::sample s { i_args };
 
         s.frames = speech::load_frame_batch(frame_batch);
 
@@ -93,7 +93,7 @@ void prediction_env::run()
 
         if (ebt::in(std::string("nn-param"), args)) {
             std::shared_ptr<lstm::transcriber> trans
-                = fscrf::make_transcriber(i_args);
+                = seg::make_transcriber(i_args);
 
             if (ebt::in(std::string("logsoftmax"), args)) {
                 trans = std::make_shared<lstm::logsoftmax_transcriber>(
@@ -104,22 +104,19 @@ void prediction_env::run()
             }
         }
 
-        fscrf::make_graph(s, i_args, frame_ops.size());
+        seg::make_graph(s, i_args, frame_ops.size());
 
         auto frame_mat = autodiff::row_cat(frame_ops);
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
-        s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat);
+        s.graph_data.weight_func = seg::make_weights(i_args.features, var_tree, frame_mat);
 
-        fscrf::fscrf_data graph_path_data;
-        graph_path_data.fst = scrf::shortest_path(s.graph_data);
+        seg::seg_fst<seg::iseg_data> graph { s.graph_data };
 
-        fscrf::fscrf_fst graph_path { graph_path_data };
+        std::vector<int> path = fst::shortest_path(graph, *s.graph_data.topo_order);
 
-        fscrf::fscrf_fst graph { s.graph_data };
-
-        for (auto& e: graph_path.edges()) {
-            std::cout << i_args.id_label.at(graph_path.output(e)) << " ";
+        for (auto& e: path) {
+            std::cout << i_args.id_label.at(graph.output(e)) << " ";
         }
         std::cout << "(" << nsample << ".dot)";
         std::cout << std::endl;

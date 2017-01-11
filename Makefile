@@ -1,4 +1,4 @@
-CXXFLAGS += -std=c++11 -I .. -L ../speech -L ../nn -L ../autodiff -L ../opt -L ../la -L ../ebt -L ../seg
+CXXFLAGS += -std=c++11 -I .. -L ../speech -L ../nn -L ../autodiff -L ../opt -L ../la -L ../ebt -L ../seg -L ../fst
 
 bin = \
     oracle-error \
@@ -12,13 +12,14 @@ bin = \
     predict-order1-lat \
     forced-align-order1-full \
     prune-random \
-    learn-order2-lat \
-    predict-order2-lat \
+    lat-order2-learn \
+    lat-order2-predict \
     overlap-vs-per \
     segrnn-learn \
     segrnn-predict \
     segrnn-prune \
     segrnn-align \
+    segrnn-input-grad \
     segrnn-cascade-learn \
     segrnn-cascade-predict
 
@@ -31,7 +32,7 @@ clean:
 	-rm $(bin)
 
 oracle-error: oracle-error.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg2 -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 oracle-cost: oracle-cost.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
@@ -66,23 +67,23 @@ predict-order1-lat: predict-order1-lat.o
 prune-random: prune-random.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
-learn-order2-lat: learn-order2-lat.o
+lat-order2-learn: lat-order2-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
-predict-order2-lat: predict-order2-lat.o
+lat-order2-predict: lat-order2-predict.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 overlap-vs-per: overlap-vs-per.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-learn: segrnn-learn.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg2 -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-predict: segrnn-predict.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg2 -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-prune: segrnn-prune.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg2 -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-align: segrnn-align.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
@@ -91,5 +92,8 @@ segrnn-cascade-learn: segrnn-cascade-learn.o cascade.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-cascade-predict: segrnn-cascade-predict.o cascade.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+segrnn-input-grad: segrnn-input-grad.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 

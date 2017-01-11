@@ -1,6 +1,6 @@
-#include "seg/fscrf.h"
-#include "seg/scrf_weight.h"
-#include "seg/util.h"
+#include "seg/seg-util.h"
+#include "speech/speech.h"
+#include "fst/fst-algo.h"
 #include <fstream>
 
 struct prediction_env {
@@ -8,7 +8,7 @@ struct prediction_env {
     std::ifstream frame_batch;
     std::ifstream label_batch;
 
-    fscrf::inference_args i_args;
+    seg::inference_args i_args;
 
     double alpha;
 
@@ -25,7 +25,7 @@ struct prediction_env {
 int main(int argc, char *argv[])
 {
     ebt::ArgumentSpec spec {
-        "segrnn-predict",
+        "segrnn-prune",
         "Prune with segmental RNN",
         {
             {"frame-batch", "", false},
@@ -78,7 +78,7 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
 
     output.open(args.at("output"));
 
-    fscrf::parse_inference_args(i_args, args);
+    seg::parse_inference_args(i_args, args);
 }
 
 void prediction_env::run()
@@ -87,14 +87,14 @@ void prediction_env::run()
 
     while (1) {
 
-        fscrf::sample s { i_args };
+        seg::sample s { i_args };
 
         s.frames = speech::load_frame_batch(frame_batch);
 
         std::vector<std::string> label_seq;
 
         if (ebt::in(std::string("label-batch"), args)) {
-            label_seq = util::load_label_seq(label_batch);
+            label_seq = speech::load_label_seq(label_batch);
         }
 
         if (!frame_batch) {
@@ -114,7 +114,7 @@ void prediction_env::run()
 
         if (ebt::in(std::string("nn-param"), args)) {
             std::shared_ptr<lstm::transcriber> trans
-                = fscrf::make_transcriber(i_args);
+                = seg::make_transcriber(i_args);
 
             if (ebt::in(std::string("logsoftmax"), args)) {
                 trans = std::make_shared<lstm::logsoftmax_transcriber>(
@@ -125,22 +125,22 @@ void prediction_env::run()
             }
         }
 
-        fscrf::make_graph(s, i_args, frame_ops.size());
+        seg::make_graph(s, i_args, frame_ops.size());
 
         auto frame_mat = autodiff::row_cat(frame_ops);
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
-        s.graph_data.weight_func = fscrf::make_weights(i_args.features, var_tree, frame_mat);
+        s.graph_data.weight_func = seg::make_weights(i_args.features, var_tree, frame_mat);
 
-        fscrf::fscrf_fst graph { s.graph_data };
+        seg::seg_fst<seg::iseg_data> graph { s.graph_data };
 
-        fst::forward_one_best<fscrf::fscrf_fst> forward;
+        fst::forward_one_best<seg::seg_fst<seg::iseg_data>> forward;
         for (auto v: graph.initials()) {
             forward.extra[v] = {-1, 0};
         }
         forward.merge(graph, *s.graph_data.topo_order);
 
-        fst::backward_one_best<fscrf::fscrf_fst> backward;
+        fst::backward_one_best<seg::seg_fst<seg::iseg_data>> backward;
         for (auto v: graph.finals()) {
             backward.extra[v] = {-1, 0};
         }
@@ -253,36 +253,29 @@ void prediction_env::run()
                 label_seq_id.push_back(i_args.label_id.at(s));
             }
 
-            ilat::fst label_fst = fscrf::make_label_fst(label_seq_id, i_args.label_id, i_args.id_label);
+            ifst::fst label_fst = seg::make_label_fst(label_seq_id, i_args.label_id, i_args.id_label);
 
-            ilat::fst& graph_fst = *s.graph_data.fst;
+            ifst::fst& graph_fst = *s.graph_data.fst;
 
-            ilat::lazy_pair_mode1 composed_fst { label_fst, graph_fst };
+            fst::lazy_pair_mode1_fst<ifst::fst, ifst::fst> composed_fst { label_fst, graph_fst };
 
-            fscrf::fscrf_pair_data pair_data;
-            pair_data.fst = std::make_shared<ilat::lazy_pair_mode1>(composed_fst);
-            pair_data.weight_func = std::make_shared<fscrf::mode2_weight>(
-                fscrf::mode2_weight { s.graph_data.weight_func });
+            seg::pair_iseg_data pair_data;
+            pair_data.fst = std::make_shared<fst::lazy_pair_mode1_fst<ifst::fst, ifst::fst>>(composed_fst);
+            pair_data.weight_func = std::make_shared<seg::mode2_weight>(
+                seg::mode2_weight { s.graph_data.weight_func });
             pair_data.topo_order = std::make_shared<std::vector<std::tuple<int, int>>>(
                 fst::topo_order(composed_fst));
 
-            fscrf::fscrf_pair_fst pair { pair_data };
+            seg::seg_fst<seg::pair_iseg_data> pair { pair_data };
 
-            fst::forward_one_best<fscrf::fscrf_pair_fst> one_best;
-            for (auto& i: composed_fst.initials()) {
-                one_best.extra[i] = fst::forward_one_best<fscrf::fscrf_pair_fst>::extra_data
-                    { std::make_tuple(-1, -1), 0 };
-            }
-            one_best.merge(pair, *pair_data.topo_order);
-
-            std::vector<std::tuple<int, int>> aligned_edges = one_best.best_path(pair);
+            std::vector<std::tuple<int, int>> aligned_edges = fst::shortest_path(pair, *pair_data.topo_order);
 
             for (auto& e: aligned_edges) {
                 retained_edges.insert(std::get<1>(e));
             }
         }
 
-        ilat::fst_data data;
+        ifst::fst_data data;
         data.symbol_id = std::make_shared<std::unordered_map<std::string, int>>(i_args.label_id);
         data.id_symbol = std::make_shared<std::vector<std::string>>(i_args.id_label);
 
@@ -296,26 +289,26 @@ void prediction_env::run()
             if (!ebt::in(tail, vertex_map)) {
                 int v = vertex_map.size();
                 vertex_map[tail] = v;
-                ilat::add_vertex(data, v, ilat::vertex_data { graph.time(tail) });
+                ifst::add_vertex(data, v, ifst::vertex_data { graph.time(tail) });
             }
 
             if (!ebt::in(head, vertex_map)) {
                 int v = vertex_map.size();
                 vertex_map[head] = v;
-                ilat::add_vertex(data, v, ilat::vertex_data { graph.time(head) });
+                ifst::add_vertex(data, v, ifst::vertex_data { graph.time(head) });
             }
 
             int tail_new = vertex_map.at(tail);
             int head_new = vertex_map.at(head);
             int e_new = data.edges.size();
-            ilat::add_edge(data, e_new, ilat::edge_data { tail_new, head_new, weight,
+            ifst::add_edge(data, e_new, ifst::edge_data { tail_new, head_new, weight,
                 graph.input(e), graph.output(e) });
         }
 
         output << nsample << ".lat" << std::endl;
 
-        ilat::fst f;
-        f.data = std::make_shared<ilat::fst_data>(data);
+        ifst::fst f;
+        f.data = std::make_shared<ifst::fst_data>(data);
 
         for (int i = 0; i < f.vertices().size(); ++i) {
             if (ebt::in(std::string("subsampling"), args)) {

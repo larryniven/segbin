@@ -7,7 +7,7 @@ struct learning_env {
 
     std::ifstream frame_batch;
     std::ifstream lat_batch;
-    std::ifstream gt_batch;
+    std::ifstream label_batch;
 
     std::shared_ptr<tensor_tree::vertex> param;
     std::shared_ptr<tensor_tree::vertex> opt_data;
@@ -42,12 +42,12 @@ struct learning_env {
 int main(int argc, char *argv[])
 {
     ebt::ArgumentSpec spec {
-        "learn-order1-lat",
+        "lat-order2-learn",
         "Learn segmental CRF",
         {
             {"frame-batch", "", false},
             {"lat-batch", "", true},
-            {"gt-batch", "", true},
+            {"label-batch", "", true},
             {"lm", "", true},
             {"param", "", true},
             {"opt-data", "", true},
@@ -58,9 +58,9 @@ int main(int argc, char *argv[])
             {"save-every", "", false},
             {"output-param", "", false},
             {"output-opt-data", "", false},
-            {"loss", "", true},
             {"cost-scale", "", false},
             {"label", "", true},
+            {"const-step-update", "", false}
         }
     };
 
@@ -87,7 +87,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     : args(args)
 {
     lat_batch.open(args.at("lat-batch"));
-    gt_batch.open(args.at("gt-batch"));
+    label_batch.open(args.at("label-batch"));
 
     if (ebt::in(std::string("frame-batch"), args)) {
         frame_batch.open(args.at("frame-batch"));
@@ -156,9 +156,9 @@ void learning_env::run()
     while (1) {
 
         ilat::fst lat = ilat::load_lattice(lat_batch, label_id);
-        std::vector<segcost::segment<int>> gt_segs = util::load_segments(gt_batch, label_id);
+        std::vector<int> label_seq = util::load_label_seq(label_batch, label_id);
 
-        if (!lat_batch || !gt_batch) {
+        if (!lat_batch) {
             break;
         }
 
@@ -174,7 +174,8 @@ void learning_env::run()
         ilat::lazy_pair_mode1 composed_fst { lat, *lm };
 
         fscrf::fscrf_pair_data graph_data;
-        graph_data.topo_order = std::make_shared<std::vector<std::tuple<int, int>>>(fst::topo_order(composed_fst));
+        graph_data.topo_order = std::make_shared<std::vector<std::tuple<int, int>>>(
+            fst::topo_order(composed_fst));
         graph_data.fst = std::make_shared<ilat::lazy_pair_mode1>(composed_fst);
 
         autodiff::computation_graph comp_graph;
@@ -184,15 +185,18 @@ void learning_env::run()
 
         fscrf::loss_func *loss_func;
 
-        if (args.at("loss") == "hinge-loss") {
-            loss_func = new fscrf::hinge_loss_pair { graph_data, gt_segs, sils, cost_scale };
-        }
+        loss_func = new fscrf::marginal_log_loss_pair { graph_data, label_seq };
 
         double ell = loss_func->loss();
 
         std::cout << "loss: " << ell << std::endl;
 
         std::shared_ptr<tensor_tree::vertex> param_grad = fscrf::make_tensor_tree(features);
+
+        auto vars = tensor_tree::leaves_pre_order(param);
+        auto& t = tensor_tree::get_tensor(vars[1]);
+
+        double w1 = t({0});
 
         if (ell > 0) {
             loss_func->grad();
@@ -201,18 +205,27 @@ void learning_env::run()
 
             tensor_tree::copy_grad(param_grad, var_tree);
 
+            auto grad_vars = tensor_tree::leaves_pre_order(param_grad);
+            auto& g = tensor_tree::get_tensor(grad_vars[1]);
+            std::cout << "analytic grad: " << g({0}) << std::endl;
+
             if (ebt::in(std::string("decay"), args)) {
                 tensor_tree::rmsprop_update(param, param_grad, opt_data,
                     decay, step_size);
             } else if (ebt::in(std::string("momentum"), args)) {
                 tensor_tree::const_step_update_momentum(param, param_grad, opt_data,
                     step_size, momentum);
+            } else if (ebt::in(std::string("const-step-update"), args)) {
+                tensor_tree::const_step_update(param, param_grad, step_size);
             } else {
-                tensor_tree::adagrad_update(param, param_grad, opt_data,
-                    step_size);
+                tensor_tree::adagrad_update(param, param_grad, opt_data, step_size);
             }
 
         }
+
+        double w2 = t({0});
+
+        std::cout << "weight: " << w1 << " update: " << w2 - w1 / w1 << std::endl;
 
         if (ell < 0) {
             std::cout << "loss is less than zero.  skipping." << std::endl;

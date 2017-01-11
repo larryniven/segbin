@@ -1,12 +1,13 @@
-#include "seg/fscrf.h"
-#include "seg/scrf_weight.h"
-#include "seg/util.h"
+#include "seg/seg-util.h"
+#include "speech/speech.h"
 #include <fstream>
+#include "ebt/ebt.h"
+#include "seg/loss.h"
 
 struct learning_env {
 
-    util::batch_indices frame_batch;
-    util::batch_indices label_batch;
+    speech::batch_indices frame_batch;
+    speech::batch_indices label_batch;
 
     std::string output_param;
     std::string output_opt_data;
@@ -14,7 +15,7 @@ struct learning_env {
     std::string output_nn_param;
     std::string output_nn_opt_data;
 
-    fscrf::learning_args l_args;
+    seg::learning_args l_args;
 
     double dropout;
 
@@ -116,7 +117,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         clip = std::stod(args.at("clip"));
     }
 
-    fscrf::parse_learning_args(l_args, args);
+    seg::parse_learning_args(l_args, args);
 
     if (ebt::in(std::string("shuffle"), args)) {
         std::vector<int> indices;
@@ -147,11 +148,11 @@ void learning_env::run()
 
     while (nsample < frame_batch.pos.size()) {
 
-        fscrf::learning_sample s { l_args };
+        seg::learning_sample s { l_args };
 
         s.frames = speech::load_frame_batch(frame_batch.at(nsample));
 
-        std::vector<int> label_seq = util::load_label_seq(label_batch.at(nsample), l_args.label_id);
+        std::vector<int> label_seq = speech::load_label_seq(label_batch.at(nsample), l_args.label_id);
 
         std::cout << "sample: " << nsample + 1 << std::endl;
         std::cout << "gold len: " << label_seq.size() << std::endl;
@@ -163,7 +164,7 @@ void learning_env::run()
         std::shared_ptr<tensor_tree::vertex> lstm_var_tree;
 
         if (ebt::in(std::string("nn-param"), args)) {
-            lstm_var_tree = make_var_tree(comp_graph, l_args.nn_param);
+            lstm_var_tree = tensor_tree::make_var_tree(comp_graph, l_args.nn_param);
         }
 
         std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
@@ -175,7 +176,7 @@ void learning_env::run()
         }
 
         if (ebt::in(std::string("nn-param"), args)) {
-            std::shared_ptr<lstm::transcriber> trans = fscrf::make_transcriber(l_args);
+            std::shared_ptr<lstm::transcriber> trans = seg::make_transcriber(l_args);
 
             if (ebt::in(std::string("logsoftmax"), args)) {
                 trans = std::make_shared<lstm::logsoftmax_transcriber>(
@@ -192,22 +193,22 @@ void learning_env::run()
             continue;
         }
 
-        fscrf::make_graph(s, l_args, frame_ops.size());
+        seg::make_graph(s, l_args, frame_ops.size());
 
         auto frame_mat = autodiff::row_cat(frame_ops);
 
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
         if (dropout == 0.0) {
-            s.graph_data.weight_func = fscrf::make_weights(l_args.features, var_tree, frame_mat);
+            s.graph_data.weight_func = seg::make_weights(l_args.features, var_tree, frame_mat);
         } else {
-            s.graph_data.weight_func = fscrf::make_weights(l_args.features, var_tree, frame_mat,
+            s.graph_data.weight_func = seg::make_weights(l_args.features, var_tree, frame_mat,
                 dropout, &l_args.gen);
         }
 
-        fscrf::loss_func *loss_func;
+        seg::loss_func *loss_func;
 
-        loss_func = new fscrf::marginal_log_loss { s.graph_data, label_seq };
+        loss_func = new seg::marginal_log_loss { s.graph_data, label_seq };
 
         double ell = loss_func->loss();
 
@@ -215,9 +216,9 @@ void learning_env::run()
         std::cout << "E: " << ell / label_seq.size() << std::endl;
 
         std::shared_ptr<tensor_tree::vertex> param_grad
-            = fscrf::make_tensor_tree(l_args.features);
+            = seg::make_tensor_tree(l_args.features);
         std::shared_ptr<tensor_tree::vertex> nn_param_grad
-            = fscrf::make_lstm_tensor_tree(l_args.outer_layer, l_args.inner_layer);
+            = seg::make_lstm_tensor_tree(l_args.outer_layer, l_args.inner_layer);
 
         if (ell > 0) {
             loss_func->grad();
@@ -336,9 +337,9 @@ void learning_env::run()
     tensor_tree::save_tensor(l_args.opt_data, output_opt_data);
 
     if (ebt::in(std::string("nn-param"), args)) {
-        fscrf::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
+        seg::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
             l_args.nn_param, output_nn_param);
-        fscrf::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
+        seg::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
             l_args.nn_opt_data, output_nn_opt_data);
     }
 

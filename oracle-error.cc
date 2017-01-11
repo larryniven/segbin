@@ -1,6 +1,9 @@
-#include "seg/fscrf.h"
-#include "seg/scrf_weight.h"
-#include "seg/util.h"
+#include "seg/seg-util.h"
+#include "fst/ifst.h"
+#include "ebt/ebt.h"
+#include "speech/speech.h"
+#include "fst/fst-algo.h"
+#include "seg/lat.h"
 #include <fstream>
 
 struct oracle_env {
@@ -9,7 +12,7 @@ struct oracle_env {
 
     std::ifstream lattice_batch;
 
-    fscrf::inference_args i_args;
+    seg::inference_args i_args;
 
     std::vector<std::string> ignored;
 
@@ -21,12 +24,12 @@ struct oracle_env {
 
 };
 
-ilat::fst make_label_fst(std::vector<std::string> const& label_seq,
+ifst::fst make_label_fst(std::vector<std::string> const& label_seq,
     std::unordered_map<std::string, int> const& label_id,
     std::unordered_set<int> const& labels);
 
 std::tuple<int, int, int, int> error_analysis(std::vector<std::tuple<int, int>> const& edges,
-    ilat::lazy_pair_mode1 const& composed_fst);
+    fst::lazy_pair_mode1_fst<ifst::fst, ifst::fst> const& composed_fst);
 
 int main(int argc, char *argv[])
 {
@@ -70,7 +73,7 @@ oracle_env::oracle_env(std::unordered_map<std::string, std::string> args)
 
     lattice_batch.open(args.at("lattice-batch"));
 
-    i_args.label_id = util::load_label_id(args.at("label"));
+    i_args.label_id = speech::load_label_id(args.at("label"));
 
     i_args.id_label.resize(i_args.label_id.size());
     for (auto& p: i_args.label_id) {
@@ -85,7 +88,6 @@ oracle_env::oracle_env(std::unordered_map<std::string, std::string> args)
 
 void oracle_env::run()
 {
-    
     ebt::Timer timer;
 
     int i = 1;
@@ -102,13 +104,13 @@ void oracle_env::run()
 
         std::unordered_set<int> local_labels;
 
-        std::vector<std::string> label_seq = util::load_labels(label_batch);
+        std::vector<std::string> label_seq = speech::load_label_seq(label_batch);
 
         if (!label_batch) {
             break;
         }
 
-        ilat::fst lat = ilat::load_lattice(lattice_batch, i_args.label_id);
+        ifst::fst lat = lat::load_lattice(lattice_batch, i_args.label_id);
 
         if (!lattice_batch) {
             break;
@@ -126,19 +128,19 @@ void oracle_env::run()
             local_labels.insert(i_args.label_id.at(s));
         }
 
-        ilat::add_eps_loops(lat);
+        ifst::add_eps_loops(lat);
 
-        ilat::fst label_fst = make_label_fst(label_seq, i_args.label_id, local_labels);
+        ifst::fst label_fst = make_label_fst(label_seq, i_args.label_id, local_labels);
 
         for (auto& ig: ignored) {
-            ilat::add_eps_loops(label_fst, i_args.label_id.at(ig));
+            ifst::add_eps_loops(label_fst, i_args.label_id.at(ig));
         }
 
-        ilat::lazy_pair_mode1 composed_fst { lat, label_fst };
+        fst::lazy_pair_mode1_fst<ifst::fst, ifst::fst> composed_fst { lat, label_fst };
 
         auto topo_order = fst::topo_order(composed_fst);
 
-        fst::forward_one_best<ilat::lazy_pair_mode1> one_best;
+        fst::forward_one_best<fst::lazy_pair_mode1_fst<ifst::fst, ifst::fst>> one_best;
         for (auto& i: composed_fst.initials()) {
             one_best.extra[i] = { std::make_tuple(-1, -1), 0 };
         }
@@ -198,31 +200,31 @@ void oracle_env::run()
     }
 }
 
-ilat::fst make_label_fst(std::vector<std::string> const& label_seq,
+ifst::fst make_label_fst(std::vector<std::string> const& label_seq,
     std::unordered_map<std::string, int> const& label_id,
     std::unordered_set<int> const& labels)
 {
-    ilat::fst_data data;
+    ifst::fst_data data;
     data.symbol_id = std::make_shared<std::unordered_map<std::string, int>>(label_id);
 
     int v = 0;
-    ilat::add_vertex(data, v, ilat::vertex_data { v });
+    ifst::add_vertex(data, v, ifst::vertex_data { v });
 
     for (int i = 0; i < label_seq.size(); ++i) {
         int u = data.vertices.size();
-        ilat::add_vertex(data, u, ilat::vertex_data { u });
+        ifst::add_vertex(data, u, ifst::vertex_data { u });
 
         // substitution
         for (int ell: labels) {
             int e = data.edges.size();
-            ilat::add_edge(data, e, ilat::edge_data { v, u,
+            ifst::add_edge(data, e, ifst::edge_data { v, u,
                 (ell == label_id.at(label_seq.at(i)) ? 0.0 : -1.0),
                 ell, label_id.at(label_seq.at(i)) });
         }
 
         // insertion
         int e = data.edges.size();
-        ilat::add_edge(data, e, ilat::edge_data { v, u,
+        ifst::add_edge(data, e, ifst::edge_data { v, u,
             -1.0, 0, label_id.at(label_seq.at(i)) });
 
         v = u;
@@ -235,19 +237,19 @@ ilat::fst make_label_fst(std::vector<std::string> const& label_seq,
         // deletion
         for (int ell: labels) {
             int e = data.edges.size();
-            ilat::add_edge(data, e, ilat::edge_data { v, v,
+            ifst::add_edge(data, e, ifst::edge_data { v, v,
                 -1, ell, 0 });
         }
     }
 
-    ilat::fst f;
-    f.data = std::make_shared<ilat::fst_data>(data);
+    ifst::fst f;
+    f.data = std::make_shared<ifst::fst_data>(data);
 
     return f;
 }
 
 std::tuple<int, int, int, int> error_analysis(std::vector<std::tuple<int, int>> const& edges,
-    ilat::lazy_pair_mode1 const& composed_fst)
+    fst::lazy_pair_mode1_fst<ifst::fst, ifst::fst> const& composed_fst)
 {
     int ins = 0;
     int del = 0;
