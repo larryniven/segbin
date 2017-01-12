@@ -26,6 +26,7 @@ int main(int argc, char *argv[])
             {"frame-batch", "", false},
             {"min-seg", "", false},
             {"max-seg", "", false},
+            {"stride", "", false},
             {"param", "", true},
             {"nn-param", "", false},
             {"features", "", true},
@@ -83,8 +84,11 @@ void prediction_env::run()
         std::shared_ptr<tensor_tree::vertex> var_tree
             = tensor_tree::make_var_tree(comp_graph, i_args.param);
 
-        std::shared_ptr<tensor_tree::vertex> lstm_var_tree
-            = make_var_tree(comp_graph, i_args.nn_param);
+        std::shared_ptr<tensor_tree::vertex> lstm_var_tree;
+
+        if (ebt::in(std::string("nn-param"), args)) {
+            lstm_var_tree = make_var_tree(comp_graph, i_args.nn_param);
+        }
 
         std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
         for (int i = 0; i < s.frames.size(); ++i) {
