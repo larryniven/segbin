@@ -32,6 +32,7 @@ int main(int argc, char *argv[])
             {"label", "", true},
             {"subsampling", "", false},
             {"logsoftmax", "", false},
+            {"print-path", "", false},
         }
     };
 
@@ -115,11 +116,19 @@ void prediction_env::run()
 
         std::vector<int> path = fst::shortest_path(graph, *s.graph_data.topo_order);
 
-        for (auto& e: path) {
-            std::cout << i_args.id_label.at(graph.output(e)) << " ";
+        if (ebt::in(std::string("print-path"), args)) {
+            std::cout << nsample << ".txt" << std::endl;
+            for (auto& e: path) {
+                std::cout << graph.time(graph.tail(e)) << " " << graph.time(graph.head(e)) << " " << i_args.id_label.at(graph.output(e)) << std::endl;
+            }
+            std::cout << "." << std::endl;
+        } else {
+            for (auto& e: path) {
+                std::cout << i_args.id_label.at(graph.output(e)) << " ";
+            }
+            std::cout << "(" << nsample << ".dot)";
+            std::cout << std::endl;
         }
-        std::cout << "(" << nsample << ".dot)";
-        std::cout << std::endl;
 
         ++nsample;
     }

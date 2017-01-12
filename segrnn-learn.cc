@@ -312,7 +312,7 @@ void learning_env::run()
         double n1 = 0;
 
         if (ebt::in(std::string("nn-param"), args)) {
-            tensor_tree::norm(l_args.nn_param);
+            n1 = tensor_tree::norm(l_args.nn_param);
         }
 
         double n2 = tensor_tree::norm(l_args.param);
