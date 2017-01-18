@@ -199,11 +199,11 @@ void learning_env::run()
 
         autodiff::eval(frame_mat, autodiff::eval_funcs);
 
-        if (dropout == 0.0) {
-            s.graph_data.weight_func = seg::make_weights(l_args.features, var_tree, frame_mat);
-        } else {
+        if (ebt::in(std::string("dropout"), args)) {
             s.graph_data.weight_func = seg::make_weights(l_args.features, var_tree, frame_mat,
                 dropout, &l_args.gen);
+        } else {
+            s.graph_data.weight_func = seg::make_weights(l_args.features, var_tree, frame_mat);
         }
 
         seg::loss_func *loss_func;
@@ -214,6 +214,77 @@ void learning_env::run()
 
         std::cout << "loss: " << ell << std::endl;
         std::cout << "E: " << ell / label_seq.size() << std::endl;
+
+#if 0
+        {
+            seg::learning_args l_args2 = l_args;
+
+            l_args2.param = tensor_tree::copy_tree(l_args.param);
+
+            if (ebt::in(std::string("nn-param"), args)) {
+                l_args2.nn_param = tensor_tree::copy_tree(l_args.nn_param);
+            }
+
+            auto vars = tensor_tree::leaves_pre_order(l_args2.nn_param);
+            tensor_tree::get_tensor(vars[0]).data()[0] += 1e-8;
+
+            seg::learning_sample s2 { l_args2 };
+
+            s2.frames = s.frames;
+
+            std::vector<int> label_seq2 = label_seq;
+
+            autodiff::computation_graph comp_graph2;
+            std::shared_ptr<tensor_tree::vertex> var_tree2
+                = tensor_tree::make_var_tree(comp_graph2, l_args2.param);
+
+            std::shared_ptr<tensor_tree::vertex> lstm_var_tree2;
+
+            if (ebt::in(std::string("nn-param"), args)) {
+                lstm_var_tree2 = tensor_tree::make_var_tree(comp_graph2, l_args2.nn_param);
+            }
+
+            std::vector<std::shared_ptr<autodiff::op_t>> frame_ops2;
+            for (int i = 0; i < s2.frames.size(); ++i) {
+                auto f_var = comp_graph2.var(la::tensor<double>(
+                    la::vector<double>(s2.frames[i])));
+                f_var->grad_needed = false;
+                frame_ops2.push_back(f_var);
+            }
+
+            if (ebt::in(std::string("nn-param"), args)) {
+                std::shared_ptr<lstm::transcriber> trans2 = seg::make_transcriber(l_args2);
+
+                if (ebt::in(std::string("logsoftmax"), args)) {
+                    trans2 = std::make_shared<lstm::logsoftmax_transcriber>(
+                        lstm::logsoftmax_transcriber { trans2 });
+                    frame_ops2 = (*trans2)(lstm_var_tree2, frame_ops2);
+                } else {
+                    frame_ops2 = (*trans2)(lstm_var_tree2->children[0], frame_ops2);
+                }
+            }
+
+            seg::make_graph(s2, l_args2, frame_ops2.size());
+
+            auto frame_mat2 = autodiff::row_cat(frame_ops2);
+
+            autodiff::eval(frame_mat2, autodiff::eval_funcs);
+
+            if (ebt::in(std::string("dropout"), args)) {
+                s2.graph_data.weight_func = seg::make_weights(l_args2.features, var_tree2, frame_mat2,
+                    dropout, &l_args2.gen);
+            } else {
+                s2.graph_data.weight_func = seg::make_weights(l_args2.features, var_tree2, frame_mat2);
+            }
+
+            seg::marginal_log_loss loss_func2 { s2.graph_data, label_seq2 };
+
+            double ell2 = loss_func2.loss();
+
+            std::cout << vars.back()->name << " "
+                << "numeric grad: " << (ell2 - ell) / 1e-8 << std::endl;
+        }
+#endif
 
         std::shared_ptr<tensor_tree::vertex> param_grad
             = seg::make_tensor_tree(l_args.features);
@@ -230,8 +301,12 @@ void learning_env::run()
             if (ebt::in(std::string("nn-param"), args)) {
                 autodiff::grad(frame_mat, autodiff::grad_funcs);
                 tensor_tree::copy_grad(nn_param_grad, lstm_var_tree);
+            }
+
+            {
                 auto vars = tensor_tree::leaves_pre_order(nn_param_grad);
-                std::cout << "analytic grad: " << tensor_tree::get_tensor(vars[0]).data()[0]
+                std::cout << vars.back()->name << " "
+                    << "analytic grad: " << tensor_tree::get_tensor(vars[0]).data()[0]
                     << std::endl;
             }
 
