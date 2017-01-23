@@ -4,9 +4,24 @@
 #include "seg/loss.h"
 #include <fstream>
 
+std::shared_ptr<tensor_tree::vertex> make_recon_tensor_tree()
+{
+    tensor_tree::vertex root;
+
+    root.children.push_back(tensor_tree::make_tensor("recon weight"));
+    root.children.push_back(tensor_tree::make_tensor("recon bias"));
+
+    return std::make_shared<tensor_tree::vertex>(root);
+}
+
 struct learning_env {
 
     speech::batch_indices frame_batch;
+
+    int inner_layer;
+    int outer_layer;
+    std::shared_ptr<tensor_tree::vertex> nn_param;
+    std::shared_ptr<tensor_tree::vertex> nn_opt_data;
 
     seg::learning_args l_args;
 
@@ -15,6 +30,9 @@ struct learning_env {
 
     std::string output_nn_param;
     std::string output_nn_opt_data;
+
+    std::shared_ptr<tensor_tree::vertex> recon_param;
+    std::shared_ptr<tensor_tree::vertex> recon_opt_data;
 
     double dropout;
 
@@ -46,11 +64,15 @@ int main(int argc, char *argv[])
             {"opt-data", "", true},
             {"nn-param", "", false},
             {"nn-opt-data", "", false},
+            {"recon-param", "", false},
+            {"recon-opt-data", "", false},
             {"features", "", true},
             {"output-param", "", true},
             {"output-opt-data", "", true},
             {"output-nn-param", "", false},
             {"output-nn-opt-data", "", false},
+            {"output-recon-param", "", false},
+            {"output-recon-opt-data", "", false},
             {"step-size", "", true},
             {"const-step-update", "", false},
             {"clip", "", false},
@@ -59,7 +81,9 @@ int main(int argc, char *argv[])
             {"dropout", "", false},
             {"seed", "", false},
             {"shuffle", "", false},
-            {"save-every", "", false}
+            {"save-every", "", false},
+            {"recon-loss", "", false},
+            {"entropy-loss", "", false}
         }
     };
 
@@ -97,6 +121,16 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         output_opt_data = args.at("output-opt-data");
     }
 
+    if (ebt::in(std::string("nn-param"), args)) {
+        std::tie(outer_layer, inner_layer, nn_param)
+            = seg::load_lstm_param(args.at("nn-param"));
+    }
+
+    if (ebt::in(std::string("nn-opt-data"), args)) {
+        std::tie(outer_layer, inner_layer, nn_opt_data)
+            = seg::load_lstm_param(args.at("nn-opt-data"));
+    }
+
     output_nn_param = "nn-param-last";
     if (ebt::in(std::string("output-nn-param"), args)) {
         output_nn_param = args.at("output-nn-param");
@@ -105,6 +139,13 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     output_nn_opt_data = "nn-opt-data-last";
     if (ebt::in(std::string("output-nn-opt-data"), args)) {
         output_nn_opt_data = args.at("output-nn-opt-data");
+    }
+
+    if (ebt::in(std::string("recon-loss"), args)) {
+        recon_param = make_recon_tensor_tree();
+        tensor_tree::load_tensor(recon_param, args.at("recon-param"));
+        recon_opt_data = make_recon_tensor_tree();
+        tensor_tree::load_tensor(recon_opt_data, args.at("recon-opt-data"));
     }
 
     dropout = 0;
@@ -155,7 +196,7 @@ void learning_env::run()
         std::shared_ptr<tensor_tree::vertex> lstm_var_tree;
 
         if (ebt::in(std::string("nn-param"), args)) {
-            lstm_var_tree = make_var_tree(comp_graph, l_args.nn_param);
+            lstm_var_tree = make_var_tree(comp_graph, nn_param);
         }
 
         std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
@@ -164,9 +205,11 @@ void learning_env::run()
                 la::vector<double>(s.frames[i]))));
         }
 
+        std::vector<std::shared_ptr<autodiff::op_t>> input_frames = frame_ops;
+
         if (ebt::in(std::string("nn-param"), args)) {
             std::shared_ptr<lstm::transcriber> trans
-                = seg::make_transcriber(l_args);
+                = seg::make_transcriber(outer_layer, inner_layer, args, &l_args.gen);
 
             frame_ops = (*trans)(lstm_var_tree->children[0], frame_ops);
         }
@@ -180,12 +223,40 @@ void learning_env::run()
 
         s.graph_data.weight_func = seg::make_weights(l_args.features, var_tree, frame_mat);
 
-        seg::entropy_loss loss { s.graph_data };
+        std::shared_ptr<seg::entropy_loss> entropy_loss;
 
-        double ell = loss.loss();
+        if (ebt::in(std::string("entropy-loss"), args)) {
+            entropy_loss = std::make_shared<seg::entropy_loss>(seg::entropy_loss { s.graph_data });
+        }
 
-        std::cout << "loss: " << ell << std::endl;
-        std::cout << "nats per frame: " << ell / s.frames.size() << std::endl;
+        double ell = 0;
+
+        if (ebt::in(std::string("entropy-loss"), args)) {
+            ell += entropy_loss->loss();
+
+            std::cout << "loss: " << ell << std::endl;
+            std::cout << "nats per frame: " << ell / s.frames.size() << std::endl;
+        }
+
+        std::shared_ptr<tensor_tree::vertex> recon_var_tree;
+        std::shared_ptr<seg::frame_reconstruction_risk> risk;
+        std::shared_ptr<seg::empirical_bayes_risk> ebr_loss;
+
+        if (ebt::in(std::string("recon-loss"), args)) {
+            recon_var_tree = tensor_tree::make_var_tree(comp_graph, recon_param);
+
+            risk = std::make_shared<seg::frame_reconstruction_risk>(
+                seg::frame_reconstruction_risk { input_frames, recon_var_tree });
+
+            ebr_loss = std::make_shared<seg::empirical_bayes_risk>(
+                seg::empirical_bayes_risk { s.graph_data, risk });
+
+            double ell2 = ebr_loss->loss();
+
+            std::cout << "reconstruction loss: " << ell2 << std::endl;
+
+            ell += ell2;
+        }
 
 #if 0
         {
@@ -237,7 +308,14 @@ void learning_env::run()
 #endif
 
         if (ell > 0) {
-            loss.grad();
+            if (ebt::in(std::string("entropy-loss"), args)) {
+                entropy_loss->grad();
+            }
+
+            if (ebt::in(std::string("recon-loss"), args)) {
+                ebr_loss->grad();
+                risk->grad();
+            }
 
             s.graph_data.weight_func->grad();
 
@@ -246,15 +324,13 @@ void learning_env::run()
             std::shared_ptr<tensor_tree::vertex> param_grad
                 = seg::make_tensor_tree(l_args.features);
 
+            tensor_tree::copy_grad(param_grad, var_tree);
+
             std::shared_ptr<tensor_tree::vertex> nn_param_grad;
 
             if (ebt::in(std::string("nn-param"), args)) {
-                nn_param_grad = seg::make_lstm_tensor_tree(l_args.outer_layer, l_args.inner_layer);
-            }
+                nn_param_grad = seg::make_lstm_tensor_tree(outer_layer, inner_layer);
 
-            tensor_tree::copy_grad(param_grad, var_tree);
-
-            if (ebt::in(std::string("nn-param"), args)) {
                 autodiff::grad(frame_mat, autodiff::grad_funcs);
                 tensor_tree::copy_grad(nn_param_grad, lstm_var_tree);
 
@@ -267,10 +343,18 @@ void learning_env::run()
                     << std::endl;
             }
 
+            std::shared_ptr<tensor_tree::vertex> recon_grad;
+
+            if (ebt::in(std::string("recon-loss"), args)) {
+                recon_grad = make_recon_tensor_tree();
+
+                tensor_tree::copy_grad(recon_grad, recon_var_tree);
+            }
+
             std::vector<std::shared_ptr<tensor_tree::vertex>> vars;
 
             if (ebt::in(std::string("nn-param"), args)) {
-                vars = tensor_tree::leaves_pre_order(l_args.nn_param);
+                vars = tensor_tree::leaves_pre_order(nn_param);
             } else {
                 vars = tensor_tree::leaves_pre_order(l_args.param);
             }
@@ -286,11 +370,21 @@ void learning_env::run()
 
                 double n2 = tensor_tree::norm(param_grad);
 
-                double n = std::sqrt(n1 * n1 + n2 * n2);
+                double n3 = 0;
+
+                if (ebt::in(std::string("recon-loss"), args)) {
+                    n3 = tensor_tree::norm(recon_grad);
+                }
+
+                double n = std::sqrt(n1 * n1 + n2 * n2 + n3 * n3);
 
                 if (n > clip) {
                     if (ebt::in(std::string("nn-param"), args)) {
                         tensor_tree::imul(nn_param_grad, clip / n);
+                    }
+
+                    if (ebt::in(std::string("recon-loss"), args)) {
+                        tensor_tree::imul(recon_grad, clip / n);
                     }
 
                     tensor_tree::imul(param_grad, clip / n);
@@ -305,23 +399,38 @@ void learning_env::run()
                     l_args.opt_data, l_args.decay, l_args.step_size);
 
                 if (ebt::in(std::string("nn-param"), args)) {
-                    tensor_tree::rmsprop_update(l_args.nn_param, nn_param_grad,
-                        l_args.nn_opt_data, l_args.decay, l_args.step_size);
+                    tensor_tree::rmsprop_update(nn_param, nn_param_grad,
+                        nn_opt_data, l_args.decay, l_args.step_size);
+                }
+
+                if (ebt::in(std::string("recon-loss"), args)) {
+                    tensor_tree::rmsprop_update(recon_param, recon_grad,
+                        recon_opt_data, l_args.decay, l_args.step_size);
                 }
             } else if (ebt::in(std::string("momentum"), l_args.args)) {
                 tensor_tree::const_step_update_momentum(l_args.param, param_grad,
                     l_args.opt_data, l_args.step_size, l_args.momentum);
 
                 if (ebt::in(std::string("nn-param"), args)) {
-                    tensor_tree::const_step_update_momentum(l_args.nn_param, nn_param_grad,
-                        l_args.nn_opt_data, l_args.step_size, l_args.momentum);
+                    tensor_tree::const_step_update_momentum(nn_param, nn_param_grad,
+                        nn_opt_data, l_args.step_size, l_args.momentum);
+                }
+
+                if (ebt::in(std::string("recon-loss"), args)) {
+                    tensor_tree::const_step_update_momentum(recon_param, recon_grad,
+                        recon_opt_data, l_args.step_size, l_args.momentum);
                 }
             } else if (ebt::in(std::string("const-step-update"), l_args.args)) {
                 tensor_tree::const_step_update(l_args.param, param_grad,
                     l_args.step_size);
 
                 if (ebt::in(std::string("nn-param"), args)) {
-                    tensor_tree::const_step_update(l_args.nn_param, nn_param_grad,
+                    tensor_tree::const_step_update(nn_param, nn_param_grad,
+                        l_args.step_size);
+                }
+
+                if (ebt::in(std::string("recon-loss"), args)) {
+                    tensor_tree::const_step_update(recon_param, recon_grad,
                         l_args.step_size);
                 }
             } else {
@@ -329,8 +438,13 @@ void learning_env::run()
                     l_args.opt_data, l_args.step_size);
 
                 if (ebt::in(std::string("nn-param"), args)) {
-                    tensor_tree::adagrad_update(l_args.nn_param, nn_param_grad,
-                        l_args.nn_opt_data, l_args.step_size);
+                    tensor_tree::adagrad_update(nn_param, nn_param_grad,
+                        nn_opt_data, l_args.step_size);
+                }
+
+                if (ebt::in(std::string("recon-loss"), args)) {
+                    tensor_tree::adagrad_update(recon_param, recon_grad,
+                        recon_opt_data, l_args.step_size);
                 }
             }
 
@@ -346,12 +460,18 @@ void learning_env::run()
         double n1 = 0;
 
         if (ebt::in(std::string("nn-param"), args)) {
-            n1 = tensor_tree::norm(l_args.nn_param);
+            n1 = tensor_tree::norm(nn_param);
         }
 
         double n2 = tensor_tree::norm(l_args.param);
 
-        std::cout << "norm: " << std::sqrt(n1 * n1 + n2 * n2) << std::endl;
+        double n3 = 0;
+
+        if (ebt::in(std::string("recon-loss"), args)) {
+            n3 = tensor_tree::norm(recon_param);
+        }
+
+        std::cout << "norm: " << std::sqrt(n1 * n1 + n2 * n2 + n3 * n3) << std::endl;
 
         std::cout << std::endl;
 
@@ -361,11 +481,17 @@ void learning_env::run()
                 tensor_tree::save_tensor(l_args.opt_data, "opt-data-last");
 
                 if (ebt::in(std::string("nn-param"), args)) {
-                    seg::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
-                        l_args.nn_param, "nn-param-last");
-                    seg::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
-                        l_args.nn_opt_data, "nn-opt-data-last");
+                    seg::save_lstm_param(outer_layer, inner_layer,
+                        nn_param, "nn-param-last");
+                    seg::save_lstm_param(outer_layer, inner_layer,
+                        nn_opt_data, "nn-opt-data-last");
                 }
+
+                if (ebt::in(std::string("recon-loss"), args)) {
+                    tensor_tree::save_tensor(recon_param, "recon-param-last");
+                    tensor_tree::save_tensor(recon_opt_data, "recon-opt-data-last");
+                }
+
             }
         }
 
@@ -376,10 +502,15 @@ void learning_env::run()
     tensor_tree::save_tensor(l_args.opt_data, output_opt_data);
 
     if (ebt::in(std::string("nn-param"), args)) {
-        seg::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
-            l_args.nn_param, output_nn_param);
-        seg::save_lstm_param(l_args.outer_layer, l_args.inner_layer,
-            l_args.nn_opt_data, output_nn_opt_data);
+        seg::save_lstm_param(outer_layer, inner_layer,
+            nn_param, output_nn_param);
+        seg::save_lstm_param(outer_layer, inner_layer,
+            nn_opt_data, output_nn_opt_data);
+    }
+
+    if (ebt::in(std::string("recon-loss"), args)) {
+        tensor_tree::save_tensor(recon_param, args.at("output-recon-param"));
+        tensor_tree::save_tensor(recon_opt_data, args.at("output-recon-opt-data"));
     }
 
 }

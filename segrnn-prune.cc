@@ -8,6 +8,10 @@ struct prediction_env {
     std::ifstream frame_batch;
     std::ifstream label_batch;
 
+    int inner_layer;
+    int outer_layer;
+    std::shared_ptr<tensor_tree::vertex> nn_param;
+
     seg::inference_args i_args;
 
     double alpha;
@@ -74,6 +78,11 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
         label_batch.open(args.at("label-batch"));
     }
 
+    if (ebt::in(std::string("nn-param"), args)) {
+        std::tie(outer_layer, inner_layer, nn_param)
+            = seg::load_lstm_param(args.at("nn-param"));
+    }
+
     alpha = std::stod(args.at("alpha"));
 
     output.open(args.at("output"));
@@ -105,7 +114,7 @@ void prediction_env::run()
         std::shared_ptr<tensor_tree::vertex> var_tree
             = tensor_tree::make_var_tree(comp_graph, i_args.param);
 
-        std::shared_ptr<tensor_tree::vertex> lstm_var_tree = make_var_tree(comp_graph, i_args.nn_param);
+        std::shared_ptr<tensor_tree::vertex> lstm_var_tree = make_var_tree(comp_graph, nn_param);
 
         std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
         for (int i = 0; i < s.frames.size(); ++i) {
@@ -114,7 +123,7 @@ void prediction_env::run()
 
         if (ebt::in(std::string("nn-param"), args)) {
             std::shared_ptr<lstm::transcriber> trans
-                = seg::make_transcriber(i_args);
+                = seg::make_transcriber(outer_layer, inner_layer, args, nullptr);
 
             if (ebt::in(std::string("logsoftmax"), args)) {
                 trans = std::make_shared<lstm::logsoftmax_transcriber>(

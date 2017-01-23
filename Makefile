@@ -87,7 +87,7 @@ segrnn-prune: segrnn-prune.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-align: segrnn-align.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ -lsego -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-cascade-learn: segrnn-cascade-learn.o cascade.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lsego -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
