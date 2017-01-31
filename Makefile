@@ -18,11 +18,13 @@ bin = \
     segrnn-learn \
     segrnn-predict \
     segrnn-prune \
+    segrnn-beam-prune \
     segrnn-align \
     segrnn-input-grad \
     segrnn-cascade-learn \
     segrnn-cascade-predict \
-    segrnn-entropy-learn
+    segrnn-entropy-learn \
+    segrnn-hypercolumn-learn
 
 .PHONY: all clean
 
@@ -86,6 +88,9 @@ segrnn-predict: segrnn-predict.o
 segrnn-prune: segrnn-prune.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
+segrnn-beam-prune: segrnn-beam-prune.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
 segrnn-align: segrnn-align.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
@@ -99,5 +104,8 @@ segrnn-input-grad: segrnn-input-grad.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lsego -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-entropy-learn: segrnn-entropy-learn.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+segrnn-hypercolumn-learn: segrnn-hypercolumn-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
