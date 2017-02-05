@@ -26,6 +26,8 @@ struct learning_env {
     std::shared_ptr<tensor_tree::vertex> nn_param;
     std::shared_ptr<tensor_tree::vertex> nn_opt_data;
 
+    double lambda;
+
     double dropout;
 
     double clip;
@@ -66,9 +68,8 @@ int main(int argc, char *argv[])
             {"clip", "", false},
             {"dropout", "", false},
             {"seed", "", false},
-            {"subsampling", "", false},
-            {"output-dropout", "", false},
-            {"shuffle", "", false}
+            {"shuffle", "", false},
+            {"lambda", "", false}
         }
     };
 
@@ -124,6 +125,12 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
 
     if (ebt::in(std::string("clip"), args)) {
         clip = std::stod(args.at("clip"));
+    }
+
+    lambda = 0.5;
+    if (ebt::in(std::string("lambda"), args)) {
+        lambda = std::stod(args.at("lambda"));
+        assert(0 <= lambda && lambda <= 1);
     }
 
     std::string line;
@@ -238,10 +245,12 @@ void learning_env::run()
 
         std::vector<std::string> frame_labels = to_frame_labels(s.frames.size(), segs);
 
+        assert(frame_labels.size() == s.frames.size());
+
         std::shared_ptr<lstm::transcriber> logprob_trans
             = std::make_shared<lstm::logsoftmax_transcriber>(
                 lstm::logsoftmax_transcriber { nullptr });
-        std::vector<std::shared_ptr<autodiff::op_t>> logprob = (*trans)(lstm_var_tree, frame_ops);
+        std::vector<std::shared_ptr<autodiff::op_t>> logprob = (*logprob_trans)(lstm_var_tree, frame_ops);
 
         double frame_loss_sum = 0;
         double nframes = 0;
@@ -254,18 +263,18 @@ void learning_env::run()
         for (int t = 0; t < logprob.size(); ++t) {
             auto& pred = autodiff::get_output<la::tensor<double>>(logprob[t]);
             la::tensor<double> gold;
-            gold.resize({(unsigned int)(l_args.label_id.size())});
+            gold.resize({(unsigned int)(l_args.label_id.size() - 1)});
 
             if (t * freq >= frame_labels.size()) {
                 break;
             }
 
             if (frame_labels[t * freq] != "unk") {
-                gold({l_args.label_id.at(frame_labels[t * freq])}) = 1;
+                gold({l_args.label_id.at(frame_labels[t * freq]) - 1}) = 1;
             }
 
             nn::log_loss frame_loss { gold, pred };
-            logprob[t]->grad = std::make_shared<la::tensor<double>>(frame_loss.grad());
+            logprob[t]->grad = std::make_shared<la::tensor<double>>(frame_loss.grad(1 - lambda));
 
             if (std::isnan(frame_loss.loss())) {
                 std::cerr << "loss is nan" << std::endl;
@@ -275,6 +284,8 @@ void learning_env::run()
                 nframes += 1;
             }
         }
+
+        std::cout << "frame loss: " << frame_loss_sum / nframes << std::endl;
 
         autodiff::grad(logprob_order, autodiff::grad_funcs);
 
@@ -355,7 +366,7 @@ void learning_env::run()
             = lstm_frame::make_tensor_tree(layer);
 
         if (ell > 0) {
-            loss_func->grad();
+            loss_func->grad(lambda);
 
             s.graph_data.weight_func->grad();
 
@@ -465,12 +476,14 @@ std::vector<std::string> to_frame_labels(int nframes,
     int seg_index = 0;
 
     for (int i = 0; i < nframes; ++i) {
-        if (i < segs.at(seg_index).start_time) {
+        while (seg_index < segs.size() && i >= segs.at(seg_index).end_time) {
+            ++seg_index;
+        }
+
+        if (seg_index == segs.size() || i < segs.at(seg_index).start_time) {
             result.push_back("unk");
         } else if (segs.at(seg_index).start_time <= i && i < segs.at(seg_index).end_time) {
             result.push_back(segs.at(seg_index).label);
-        } else if (i == segs.at(seg_index).end_time) {
-            ++seg_index;
         }
     }
 
