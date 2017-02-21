@@ -214,8 +214,6 @@ void learning_env::run()
 
         auto frame_mat = autodiff::row_cat(frame_ops);
 
-        autodiff::eval(frame_mat, autodiff::eval_funcs);
-
         if (ebt::in(std::string("dropout"), args)) {
             s.graph_data.weight_func = seg::make_weights(l_args.features, var_tree, frame_mat,
                 dropout, &l_args.gen);
@@ -316,7 +314,14 @@ void learning_env::run()
             tensor_tree::copy_grad(param_grad, var_tree);
 
             if (ebt::in(std::string("nn-param"), args)) {
-                autodiff::grad(frame_mat, autodiff::grad_funcs);
+
+                std::vector<std::shared_ptr<autodiff::op_t>> topo_order;
+
+                for (int i = frame_mat->id; i >= 0; --i) {
+                    topo_order.push_back(comp_graph.vertices.at(i));
+                }
+
+                autodiff::guarded_grad(topo_order, autodiff::grad_funcs);
                 tensor_tree::copy_grad(nn_param_grad, lstm_var_tree);
             }
 
@@ -348,6 +353,8 @@ void learning_env::run()
 
                 double n = std::sqrt(n1 * n1 + n2 * n2);
 
+                std::cout << "grad norm: " << n;
+
                 if (n > clip) {
                     if (ebt::in(std::string("nn-param"), args)) {
                         tensor_tree::imul(nn_param_grad, clip / n);
@@ -355,9 +362,10 @@ void learning_env::run()
 
                     tensor_tree::imul(param_grad, clip / n);
 
-                    std::cout << "grad norm: " << n
-                        << " clip: " << clip << " gradient clipped" << std::endl;
+                    std::cout << " clip: " << clip << " gradient clipped";
                 }
+
+                std::cout << std::endl;
             }
 
             if (ebt::in(std::string("decay"), l_args.args)) {

@@ -143,7 +143,6 @@ void prediction_env::run()
         seg::make_graph(s, i_args, frame_ops.size());
 
         auto frame_mat = autodiff::row_cat(frame_ops);
-        autodiff::eval(frame_mat, autodiff::eval_funcs);
 
         s.graph_data.weight_func = seg::make_weights(i_args.features, var_tree, frame_mat);
 

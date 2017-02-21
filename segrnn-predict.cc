@@ -121,7 +121,6 @@ void prediction_env::run()
         seg::make_graph(s, i_args, frame_ops.size());
 
         auto frame_mat = autodiff::row_cat(frame_ops);
-        autodiff::eval(frame_mat, autodiff::eval_funcs);
 
         s.graph_data.weight_func = seg::make_weights(i_args.features, var_tree, frame_mat);
 
@@ -132,7 +131,9 @@ void prediction_env::run()
         if (ebt::in(std::string("print-path"), args)) {
             std::cout << nsample << ".txt" << std::endl;
             for (auto& e: path) {
-                std::cout << graph.time(graph.tail(e)) << " " << graph.time(graph.head(e)) << " " << i_args.id_label.at(graph.output(e)) << std::endl;
+                std::cout << graph.time(graph.tail(e))
+                    << " " << graph.time(graph.head(e))
+                    << " " << i_args.id_label.at(graph.output(e)) << std::endl;
             }
             std::cout << "." << std::endl;
         } else {
