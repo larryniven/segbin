@@ -187,7 +187,6 @@ void learning_env::run()
         for (int i = 0; i < s.frames.size(); ++i) {
             auto f_var = comp_graph.var(la::tensor<double>(
                 la::vector<double>(s.frames[i])));
-            f_var->grad_needed = false;
             frame_ops.push_back(f_var);
         }
 
@@ -207,6 +206,7 @@ void learning_env::run()
         std::cout << "frames: " << s.frames.size() << " downsampled: " << frame_ops.size() << std::endl;
 
         if (frame_ops.size() < label_seq.size()) {
+            ++nsample;
             continue;
         }
 
