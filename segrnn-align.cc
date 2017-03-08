@@ -125,8 +125,6 @@ void alignment_env::run()
 
         auto frame_mat = autodiff::row_cat(frame_ops);
 
-        autodiff::eval(frame_mat, autodiff::eval_funcs);
-
         s.graph_data.weight_func = seg::make_weights(l_args.features, var_tree, frame_mat);
 
         std::vector<int> label_seq_id;
@@ -178,8 +176,8 @@ void alignment_env::run()
                 int head_time = graph.time(graph.head(std::get<1>(e)));
 
                 if (ebt::in(std::string("subsampling"), args)) {
-                    tail_time *= 4;
-                    head_time *= 4;
+                    tail_time *= 2 * (outer_layer - 1);
+                    head_time *= 2 * (outer_layer - 1);
                 }
 
                 std::cout << tail_time << " " << head_time

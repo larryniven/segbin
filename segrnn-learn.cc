@@ -168,7 +168,7 @@ void learning_env::run()
 
         s.frames = speech::load_frame_batch(frame_batch.at(nsample));
 
-        std::vector<int> label_seq = speech::load_label_seq(label_batch.at(nsample), l_args.label_id);
+        std::vector<int> label_seq = speech::load_label_seq_batch(label_batch.at(nsample), l_args.label_id);
 
         std::cout << "sample: " << nsample + 1 << std::endl;
         std::cout << "gold len: " << label_seq.size() << std::endl;

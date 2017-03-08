@@ -1,6 +1,7 @@
 CXXFLAGS += -std=c++11 -I .. -L ../speech -L ../nn -L ../autodiff -L ../opt -L ../la -L ../ebt -L ../seg -L ../fst
 
 bin = \
+    dtw \
     oracle-error \
     oracle-cost \
     learn-ctc \
