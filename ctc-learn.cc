@@ -290,5 +290,15 @@ void learning_env::run()
 
     }
 
+    std::ofstream param_ofs { args.at("output-param") };
+    param_ofs << layer << std::endl;
+    tensor_tree::save_tensor(param, param_ofs);
+    param_ofs.close();
+
+    std::ofstream opt_data_ofs { args.at("output-opt-data") };
+    opt_data_ofs << layer << std::endl;
+    opt->save_opt_data(opt_data_ofs);
+    opt_data_ofs.close();
+
 }
 
