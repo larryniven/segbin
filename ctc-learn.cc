@@ -51,14 +51,18 @@ int main(int argc, char *argv[])
             {"step-size", "", true},
             {"output-param", "", false},
             {"output-opt-data", "", false},
-            {"const-step-update", "", false},
             {"label", "", true},
             {"clip", "", false},
             {"dropout", "", false},
             {"seed", "", false},
             {"subsampling", "", false},
             {"output-dropout", "", false},
-            {"shuffle", "", false}
+            {"shuffle", "", false},
+            {"opt", "const-step,rmsprop,adagrad,adam", true},
+            {"decay", "", false},
+            {"momentum", "", false},
+            {"beta1", "", false},
+            {"beta2", "", false},
         }
     };
 
@@ -138,10 +142,25 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         }
     }
 
-    if (ebt::in(std::string("const-step-update"), args)) {
-        opt = std::make_shared<tensor_tree::const_step_opt>(tensor_tree::const_step_opt{param, step_size});
-    } else {
-        opt = std::make_shared<tensor_tree::adagrad_opt>(tensor_tree::adagrad_opt{param, step_size});
+    if (args.at("opt") == "const-step") {
+        opt = std::make_shared<tensor_tree::const_step_opt>(
+            tensor_tree::const_step_opt{param, step_size});
+    } else if (args.at("opt") == "const-step-momentum") {
+        double momentum = std::stod(args.at("momentum"));
+        opt = std::make_shared<tensor_tree::const_step_momentum_opt>(
+            tensor_tree::const_step_momentum_opt{param, step_size, momentum});
+    } else if (args.at("opt") == "adagrad") {
+        opt = std::make_shared<tensor_tree::adagrad_opt>(
+            tensor_tree::adagrad_opt{param, step_size});
+    } else if (args.at("opt") == "rmsprop") {
+        double decay = std::stod(args.at("decay"));
+        opt = std::make_shared<tensor_tree::rmsprop_opt>(
+            tensor_tree::rmsprop_opt{param, step_size, decay});
+    } else if (args.at("opt") == "adam") {
+        double beta1 = std::stod(args.at("beta1"));
+        double beta2 = std::stod(args.at("beta2"));
+        opt = std::make_shared<tensor_tree::adam_opt>(
+            tensor_tree::adam_opt{param, step_size, beta1, beta2});
     }
 
     std::ifstream opt_data_ifs { args.at("opt-data") };
