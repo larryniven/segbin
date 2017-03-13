@@ -4,8 +4,8 @@ bin = \
     dtw \
     oracle-error \
     oracle-cost \
-    learn-ctc \
-    predict-ctc \
+    ctc-learn \
+    ctc-predict \
     learn-order1-full \
     predict-order1-full \
     prune-order1-full \
@@ -42,11 +42,11 @@ oracle-error: oracle-error.o
 oracle-cost: oracle-cost.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lsego -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
-learn-ctc: learn-ctc.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ -lsego -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+ctc-learn: ctc-learn.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lfst -lebt -lblas
 
-predict-ctc: predict-ctc.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ -lsego -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+ctc-predict: ctc-predict.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lfst -lebt -lblas
 
 learn-order1-e2e-mll: learn-order1-e2e-mll.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lsego -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
