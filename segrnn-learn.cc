@@ -65,7 +65,8 @@ int main(int argc, char *argv[])
             {"subsampling", "", false},
             {"logsoftmax", "", false},
             {"output-dropout", "", false},
-            {"shuffle", "", false}
+            {"shuffle", "", false},
+            {"with-sil-loop", "", false}
         }
     };
 
@@ -223,7 +224,15 @@ void learning_env::run()
 
         seg::loss_func *loss_func;
 
-        loss_func = new seg::marginal_log_loss { s.graph_data, label_seq };
+        ifst::fst label_fst;
+
+        if (ebt::in(std::string("with-sil-loop"), args)) {
+            label_fst = seg::make_label_fst_with_sil_loop(label_seq, l_args.label_id, l_args.id_label);
+        } else {
+            label_fst = seg::make_label_fst(label_seq, l_args.label_id, l_args.id_label);
+        }
+
+        loss_func = new seg::marginal_log_loss { s.graph_data, label_fst };
 
         double ell = loss_func->loss();
 
