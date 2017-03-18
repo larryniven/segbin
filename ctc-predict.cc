@@ -34,6 +34,9 @@ int main(int argc, char *argv[])
             {"param", "", true},
             {"label", "", true},
             {"subsampling", "", false},
+            {"rmdup", "", false},
+            {"beam-search", "", false},
+            {"beam-width", "", false},
         }
     };
 
@@ -120,30 +123,93 @@ void prediction_env::run()
 
         seg::iseg_data graph_data;
         graph_data.fst = std::make_shared<ifst::fst>(graph_fst);
-        graph_data.weight_func = std::make_shared<ctc::label_weight>(ctc::label_weight(frame_ops));
+        graph_data.weight_func = std::make_shared<ctc::label_weight>(
+            ctc::label_weight(frame_ops));
 
         seg::seg_fst<seg::iseg_data> graph { graph_data };
 
-        fst::forward_one_best<seg::seg_fst<seg::iseg_data>> one_best;
+        if (ebt::in(std::string("beam-search"), args)) {
+            int beam_width = std::stoi(args.at("beam-width"));
 
-        for (int i: graph.initials()) {
-            one_best.extra[i] = {-1, 0};
+            ctc::beam_search<seg::seg_fst<seg::iseg_data>> beam_search;
+
+            beam_search.search(graph, label_id.at("<blk>"), beam_width);
+
+            std::unordered_map<int, double> path_score;
+
+            if (beam_search.heap.size() > 0) {
+                double inf = std::numeric_limits<double>::infinity();
+                double max = -inf;
+                int argmax = -1;
+
+                for (auto& k: beam_search.path_score) {
+                    if (!ebt::in(k.first.second, path_score)) {
+                        path_score[k.first.second] = -inf;
+                    }
+
+                    path_score[k.first.second] = ebt::log_add(path_score[k.first.second], k.second);
+                }
+
+                for (auto& k: path_score) {
+                    if (k.second > max) {
+                        max = k.second;
+                        argmax = k.first;
+                    }
+                }
+
+                for (auto& p: beam_search.id_seq[argmax]) {
+                    std::cout << id_label.at(p) << " ";
+                }
+                std::cout << "(" << nsample << ".dot)" << std::endl;
+            } else {
+                std::cout << "(" << nsample << ".dot)" << std::endl;
+            }
+        } else if (ebt::in(std::string("rmdup"), args)) {
+            fst::forward_one_best<seg::seg_fst<seg::iseg_data>> one_best;
+
+            for (auto& i: graph.initials()) {
+                one_best.extra[i] = {-1, 0};
+            }
+
+            auto topo_order = fst::topo_order(graph);
+
+            one_best.merge(graph, topo_order);
+
+            std::vector<int> path = one_best.best_path(graph);
+
+            int last = -1;
+            for (int i = 0; i < path.size(); ++i) {
+                int o_i = graph.output(path[i]);
+
+                if (last != o_i && o_i != label_id.at("<blk>")) {
+                    std::cout << id_label.at(o_i) << " ";
+                    last = o_i;
+                } else if (i >= 1 && graph.output(path[i-1]) == label_id.at("<blk>")
+                        && o_i != label_id.at("<blk>")) {
+                    std::cout << id_label.at(o_i) << " ";
+                    last = o_i;
+                }
+            }
+            std::cout << "(" << nsample << ".dot)" << std::endl;
+
+        } else {
+            fst::forward_one_best<seg::seg_fst<seg::iseg_data>> one_best;
+
+            for (auto& i: graph.initials()) {
+                one_best.extra[i] = {-1, 0};
+            }
+
+            auto topo_order = fst::topo_order(graph);
+
+            one_best.merge(graph, topo_order);
+
+            std::vector<int> path = one_best.best_path(graph);
+
+            for (auto& e: path) {
+                std::cout << id_label.at(graph.output(e)) << " ";
+            }
+            std::cout << "(" << nsample << ".dot)" << std::endl;
         }
-
-        auto topo_order = fst::topo_order(graph);
-
-        one_best.merge(graph, topo_order);
-
-        std::vector<int> path = one_best.best_path(graph);
-
-        for (int e: path) {
-            // if (id_label.at(graph.output(e)) == "<blk>") {
-            //     continue;
-            // }
-
-            std::cout << id_label.at(graph.output(e)) << " ";
-        }
-        std::cout << "(" << nsample << ".dot)" << std::endl;
 
 #if DEBUG_TOP
         if (nsample == DEBUG_TOP) {
