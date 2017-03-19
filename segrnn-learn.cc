@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
             {"logsoftmax", "", false},
             {"output-dropout", "", false},
             {"shuffle", "", false},
-            {"with-sil-loop", "", false}
+            {"long-labels", "", false}
         }
     };
 
@@ -226,8 +226,10 @@ void learning_env::run()
 
         ifst::fst label_fst;
 
-        if (ebt::in(std::string("with-sil-loop"), args)) {
-            label_fst = seg::make_label_fst_with_sil_loop(label_seq, l_args.label_id, l_args.id_label);
+        if (ebt::in(std::string("long-labels"), args)) {
+            std::vector<std::string> long_labels = ebt::split(args.at("long-labels"), ",");
+
+            label_fst = seg::make_label_fst(label_seq, l_args.label_id, l_args.id_label, long_labels);
         } else {
             label_fst = seg::make_label_fst(label_seq, l_args.label_id, l_args.id_label);
         }
