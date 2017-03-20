@@ -63,6 +63,7 @@ int main(int argc, char *argv[])
             {"momentum", "", false},
             {"beta1", "", false},
             {"beta2", "", false},
+            {"type", "ctc,hmm1s,hmm2s", true}
         }
     };
 
@@ -221,7 +222,20 @@ void learning_env::run()
         graph_data.fst = std::make_shared<ifst::fst>(graph_fst);
         graph_data.weight_func = std::make_shared<ctc::label_weight>(ctc::label_weight(frame_ops));
 
-        ctc::loss_func loss {graph_data, label_seq};
+        ifst::fst label_fst;
+
+        if (args.at("type") == "ctc") {
+            label_fst = ctc::make_label_fst(label_seq, label_id, id_label);
+        } else if (args.at("type") == "hmm1s") {
+            label_fst = ctc::make_label_fst_hmm1s(label_seq, label_id, id_label);
+        } else if (args.at("type") == "hmm2s") {
+            label_fst = ctc::make_label_fst_hmm2s(label_seq, label_id, id_label);
+        } else {
+            std::cout << "unknown type " << args.at("type") << std::endl;
+            exit(1);
+        }
+
+        ctc::loss_func loss {graph_data, label_fst};
 
         double ell = loss.loss();
 
