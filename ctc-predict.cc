@@ -37,6 +37,7 @@ int main(int argc, char *argv[])
             {"rmdup", "", false},
             {"beam-search", "", false},
             {"beam-width", "", false},
+            {"type", "ctc,hmm1s,hmm2s", true},
         }
     };
 
@@ -137,7 +138,7 @@ void prediction_env::run()
 
             std::unordered_map<int, double> path_score;
 
-            if (beam_search.heap.size() > 0) {
+            if (args.at("type") == "ctc" && beam_search.heap.size() > 0) {
                 double inf = std::numeric_limits<double>::infinity();
                 double max = -inf;
                 int argmax = -1;
@@ -164,7 +165,7 @@ void prediction_env::run()
             } else {
                 std::cout << "(" << nsample << ".dot)" << std::endl;
             }
-        } else if (ebt::in(std::string("rmdup"), args)) {
+        } else if (args.at("type") == "ctc" && ebt::in(std::string("rmdup"), args)) {
             fst::forward_one_best<seg::seg_fst<seg::iseg_data>> one_best;
 
             for (auto& i: graph.initials()) {
@@ -191,7 +192,29 @@ void prediction_env::run()
                 }
             }
             std::cout << "(" << nsample << ".dot)" << std::endl;
+        } else if (args.at("type") == "hmm1s" && ebt::in(std::string("rmdup"), args)) {
+            fst::forward_one_best<seg::seg_fst<seg::iseg_data>> one_best;
 
+            for (auto& i: graph.initials()) {
+                one_best.extra[i] = {-1, 0};
+            }
+
+            auto topo_order = fst::topo_order(graph);
+
+            one_best.merge(graph, topo_order);
+
+            std::vector<int> path = one_best.best_path(graph);
+
+            int last = -1;
+            for (int i = 0; i < path.size(); ++i) {
+                int o_i = graph.output(path[i]);
+
+                if (last != o_i) {
+                    std::cout << id_label.at(o_i) << " ";
+                    last = o_i;
+                }
+            }
+            std::cout << "(" << nsample << ".dot)" << std::endl;
         } else {
             fst::forward_one_best<seg::seg_fst<seg::iseg_data>> one_best;
 
