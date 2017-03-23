@@ -27,7 +27,8 @@ bin = \
     segrnn-entropy-learn \
     segrnn-hypercolumn-learn \
     segrnn-frame-mll-learn \
-    segrnn-sup-learn
+    segrnn-sup-learn \
+    seglin-learn
 
 .PHONY: all clean
 
@@ -116,5 +117,8 @@ segrnn-frame-mll-learn: segrnn-frame-mll-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-sup-learn: segrnn-sup-learn.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+seglin-learn: seglin-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
