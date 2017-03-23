@@ -29,7 +29,8 @@ bin = \
     segrnn-frame-mll-learn \
     segrnn-sup-learn \
     seglin-learn \
-    seglin-sup-learn
+    seglin-sup-learn \
+    seglin-predict
 
 .PHONY: all clean
 
@@ -124,5 +125,8 @@ seglin-learn: seglin-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 seglin-sup-learn: seglin-sup-learn.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+seglin-predict: seglin-predict.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
