@@ -230,10 +230,19 @@ void learning_env::run()
             = tensor_tree::make_var_tree(comp_graph, param);
 
         std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
-        for (int i = 0; i < frames.size(); ++i) {
-            auto f_var = comp_graph.var(la::tensor<double>(
-                la::vector<double>(frames[i])));
-            frame_ops.push_back(f_var);
+        if (ebt::in(std::string("dropout"), args)) {
+            for (int i = 0; i < frames.size(); ++i) {
+                auto f_var = comp_graph.var(la::tensor<double>(
+                    la::vector<double>(frames[i])));
+                auto mask = autodiff::dropout_mask(f_var, dropout, gen);
+                frame_ops.push_back(autodiff::emul(f_var, mask));
+            }
+        } else {
+            for (int i = 0; i < frames.size(); ++i) {
+                auto f_var = comp_graph.var(la::tensor<double>(
+                    la::vector<double>(frames[i])));
+                frame_ops.push_back(f_var);
+            }
         }
 
         std::cout << "frames: " << frame_ops.size() << std::endl;
