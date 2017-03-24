@@ -63,7 +63,6 @@ int main(int argc, char *argv[])
             {"clip", "", false},
             {"dropout", "", false},
             {"seed", "", false},
-            {"subsampling", "", false},
             {"shuffle", "", false},
             {"opt", "const-step,rmsprop,adagrad", true}
         }

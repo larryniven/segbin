@@ -77,7 +77,6 @@ int main(int argc, char *argv[])
             {"dropout", "", false},
             {"seed", "", false},
             {"logsoftmax", "", false},
-            {"output-dropout", "", false},
             {"shuffle", "", false},
             {"loss", "hinge-loss,log-loss", true},
             {"opt", "const-step,const-step-momentum,rmsprop,adagrad,adam", true},
