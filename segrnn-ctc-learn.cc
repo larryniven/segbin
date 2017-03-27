@@ -23,7 +23,7 @@ struct learning_env {
     std::vector<std::string> features;
 
     speech::batch_indices frame_batch;
-    speech::batch_indices seg_batch;
+    speech::batch_indices label_batch;
 
     int max_seg;
     int min_seg;
@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
         "Learn segmental RNN",
         {
             {"frame-batch", "", true},
-            {"seg-batch", "", true},
+            {"label-batch", "", true},
             {"min-seg", "", false},
             {"max-seg", "", false},
             {"stride", "", false},
@@ -117,7 +117,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     features = ebt::split(args.at("features"), ",");
 
     frame_batch.open(args.at("frame-batch"));
-    seg_batch.open(args.at("seg-batch"));
+    label_batch.open(args.at("label-batch"));
 
     std::ifstream param_ifs { args.at("param") };
     std::string line;
@@ -194,9 +194,9 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
             frame_batch.pos[i] = pos[indices[i]];
         }
 
-        pos = seg_batch.pos;
+        pos = label_batch.pos;
         for (int i = 0; i < indices.size(); ++i) {
-            seg_batch.pos[i] = pos[indices[i]];
+            label_batch.pos[i] = pos[indices[i]];
         }
     }
 
@@ -246,12 +246,7 @@ void learning_env::run()
 
         std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_batch.at(nsample));
 
-        std::vector<speech::segment> segs = speech::load_segment_batch(seg_batch.at(nsample));
-
-        std::vector<int> label_seq;
-        for (auto& s: segs) {
-            label_seq.push_back(label_id.at(s.label));
-        }
+        std::vector<int> label_seq = speech::load_label_seq_batch(label_batch.at(nsample), label_id);
 
         std::cout << "sample: " << nsample + 1 << std::endl;
         std::cout << "gold len: " << label_seq.size() << std::endl;
