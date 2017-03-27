@@ -258,7 +258,6 @@ void learning_env::run()
         for (int i = 0; i < frames.size(); ++i) {
             auto f_var = comp_graph.var(la::tensor<double>(
                 la::vector<double>(frames[i])));
-            f_var->grad_needed = false;
             frame_ops.push_back(f_var);
         }
 
@@ -270,6 +269,7 @@ void learning_env::run()
         std::cout << "frames: " << frames.size() << " downsampled: " << frame_ops.size() << std::endl;
 
         if (frame_ops.size() < label_seq.size()) {
+            ++nsample;
             continue;
         }
 
@@ -286,16 +286,8 @@ void learning_env::run()
             graph_data.weight_func = seg::make_weights(features, var_tree->children[0], frame_mat);
         }
 
-        seg::loss_func *loss_func;
-
         ifst::fst label_fst = seg::make_label_fst(label_seq, label_id, id_label);
-
-        loss_func = new seg::marginal_log_loss { graph_data, label_fst };
-
-        double ell = loss_func->loss();
-
-        std::cout << "loss: " << ell << std::endl;
-        std::cout << "E: " << ell / label_seq.size() << std::endl;
+        seg::marginal_log_loss loss_func { graph_data, label_fst };
 
         // frame classifier
 
@@ -339,20 +331,31 @@ void learning_env::run()
             }
         }
 
-        std::cout << "frame loss: " << frame_loss_sum / nframes << std::endl;
+        double ell = lambda * loss_func.loss() + (1 - lambda) * frame_loss_sum / nframes;
 
-        auto logprob_order = autodiff::topo_order(logprob, frame_ops);
-        autodiff::grad(logprob_order, autodiff::grad_funcs);
+        std::cout << "mll: " << loss_func.loss() << std::endl;
+        std::cout << "frame loss: " << frame_loss_sum / nframes << std::endl;
+        std::cout << "loss: " << ell << std::endl;
+        std::cout << "E: " << ell / label_seq.size() << std::endl;
 
         std::shared_ptr<tensor_tree::vertex> param_grad
             = make_tensor_tree(features, layer);
 
         if (ell > 0) {
-            loss_func->grad(lambda);
+            auto logprob_order = autodiff::topo_order(logprob, frame_ops);
+            autodiff::grad(logprob_order, autodiff::grad_funcs);
+
+            loss_func.grad(lambda);
 
             graph_data.weight_func->grad();
 
-            autodiff::grad(frame_mat, autodiff::grad_funcs);
+            std::vector<std::shared_ptr<autodiff::op_t>> topo_order;
+
+            for (int i = frame_mat->id; i >= 0; --i) {
+                topo_order.push_back(comp_graph.vertices.at(i));
+            }
+
+            autodiff::guarded_grad(topo_order, autodiff::grad_funcs);
             tensor_tree::copy_grad(param_grad, var_tree);
 
             {
@@ -398,8 +401,6 @@ void learning_env::run()
         std::cout << std::endl;
 
         ++nsample;
-
-        delete loss_func;
 
 #if DEBUG_TOP
         if (nsample == DEBUG_TOP) {
