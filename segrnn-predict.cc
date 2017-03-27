@@ -86,7 +86,7 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
     std::ifstream param_ifs { args.at("param") };
     std::string line;
     std::getline(param_ifs, line);
-    layer = std::stod(line);
+    layer = std::stoi(line);
     param = make_tensor_tree(features, layer);
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
