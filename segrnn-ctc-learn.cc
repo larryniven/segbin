@@ -18,6 +18,19 @@ std::shared_ptr<tensor_tree::vertex> make_tensor_tree(
     return std::make_shared<tensor_tree::vertex>(root);
 }
 
+std::vector<int>
+remap(std::vector<int> const& label_seq, std::vector<std::string> const& id_label,
+    std::unordered_map<std::string, int> const& label_id)
+{
+    std::vector<int> result;
+
+    for (auto& t: label_seq) {
+        result.push_back(label_id.at(id_label.at(t)));
+    }
+
+    return result;
+}
+
 struct learning_env {
 
     std::vector<std::string> features;
@@ -295,11 +308,13 @@ void learning_env::run()
         std::vector<std::shared_ptr<autodiff::op_t>> logprob
             = (*trans)(var_tree->children[1], frame_ops);
 
+        std::vector<int> ctc_label_seq = remap(label_seq, id_label, ctc_label_id);
+
         ifst::fst ctc_graph_fst = ctc::make_frame_fst(frame_ops.size(), ctc_label_id, ctc_id_label);
         seg::iseg_data ctc_graph_data;
         ctc_graph_data.fst = std::make_shared<ifst::fst>(ctc_graph_fst);
         ctc_graph_data.weight_func = std::make_shared<ctc::label_weight>(ctc::label_weight(logprob));
-        ifst::fst ctc_label_fst = ctc::make_label_fst(label_seq, ctc_label_id, ctc_id_label);
+        ifst::fst ctc_label_fst = ctc::make_label_fst(ctc_label_seq, ctc_label_id, ctc_id_label);
         ctc::loss_func ctc_loss {ctc_graph_data, ctc_label_fst};
 
         double ell = lambda * mll.loss() + (1 - lambda) * ctc_loss.loss();

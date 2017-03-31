@@ -142,7 +142,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         stride = std::stoi(args.at("stride"));
     }
 
-    subsampling = 1;
+    subsampling = 0;
     if (ebt::in(std::string("subsampling"), args)) {
         subsampling = std::stoi(args.at("subsampling"));
     }
