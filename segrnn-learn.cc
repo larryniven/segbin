@@ -202,8 +202,8 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         opt = std::make_shared<tensor_tree::adagrad_opt>(
             tensor_tree::adagrad_opt{param, step_size});
     } else if (args.at("opt") == "adam") {
-        double beta1 = std::stod("beta1");
-        double beta2 = std::stod("beta2");
+        double beta1 = std::stod(args.at("beta1"));
+        double beta2 = std::stod(args.at("beta2"));
         opt = std::make_shared<tensor_tree::adam_opt>(
             tensor_tree::adam_opt{param, step_size, beta1, beta2});
     } else {
