@@ -1,37 +1,37 @@
 CXXFLAGS += -std=c++11 -I .. -L ../speech -L ../nn -L ../autodiff -L ../opt -L ../la -L ../ebt -L ../seg -L ../fst
 
 bin = \
-    dtw \
     oracle-error \
-    oracle-cost \
     ctc-learn \
     ctc-predict \
-    learn-order1-full \
-    predict-order1-full \
-    prune-order1-full \
-    learn-order1-lat \
-    predict-order1-lat \
-    forced-align-order1-full \
-    prune-random \
-    lat-order2-learn \
-    lat-order2-predict \
-    overlap-vs-per \
     segrnn-learn \
     segrnn-predict \
     segrnn-prune \
     segrnn-beam-prune \
     segrnn-align \
-    segrnn-input-grad \
-    segrnn-cascade-learn \
-    segrnn-cascade-predict \
-    segrnn-entropy-learn \
-    segrnn-hypercolumn-learn \
     segrnn-frame-learn \
     segrnn-ctc-learn \
     segrnn-sup-learn \
     seglin-learn \
     seglin-sup-learn \
     seglin-predict
+
+    # segrnn-cascade-learn \
+    # segrnn-cascade-predict \
+    # segrnn-hypercolumn-learn \
+    # segrnn-entropy-learn \
+    # segrnn-input-grad \
+    # oracle-cost \
+    # learn-order1-full \
+    # predict-order1-full \
+    # prune-order1-full \
+    # learn-order1-lat \
+    # predict-order1-lat \
+    # forced-align-order1-full \
+    # prune-random \
+    # lat-order2-learn \
+    # lat-order2-predict \
+    # overlap-vs-per \
 
 .PHONY: all clean
 
