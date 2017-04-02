@@ -75,6 +75,7 @@ int main(int argc, char *argv[])
             {"seed", "", false},
             {"shuffle", "", false},
             {"logsoftmax", "", false},
+            {"subsampling", "", false},
             {"opt", "const-step,const-step-momentum,rmsprop,adagrad,adam", true},
             {"step-size", "", true},
             {"clip", "", false},
@@ -244,8 +245,12 @@ void learning_env::run()
             frame_ops.push_back(f_var);
         }
 
-        std::shared_ptr<lstm::transcriber> trans
-            = lstm_frame::make_pyramid_transcriber(layer, dropout, &gen);
+        std::shared_ptr<lstm::transcriber> trans;
+        if (ebt::in(std::string("subsampling"), args)) {
+            trans = lstm_frame::make_pyramid_transcriber(layer, dropout, &gen);
+        } else {
+            trans = lstm_frame::make_transcriber(layer, dropout, &gen);
+        }
 
         if (ebt::in(std::string("logsoftmax"), args)) {
             trans = std::make_shared<lstm::logsoftmax_transcriber>(

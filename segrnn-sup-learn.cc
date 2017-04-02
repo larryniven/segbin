@@ -42,6 +42,8 @@ struct learning_env {
     int seed;
     std::default_random_engine gen;
 
+    int subsampling;
+
     double step_size;
     double dropout;
     double clip;
@@ -77,6 +79,7 @@ int main(int argc, char *argv[])
             {"dropout", "", false},
             {"seed", "", false},
             {"logsoftmax", "", false},
+            {"subsampling", "", false},
             {"shuffle", "", false},
             {"loss", "hinge-loss,log-loss", true},
             {"opt", "const-step,const-step-momentum,rmsprop,adagrad,adam", true},
@@ -167,6 +170,11 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
 
     gen = std::default_random_engine{seed};
 
+    subsampling = 0;
+    if (ebt::in(std::string("subsampling"), args)) {
+        subsampling = std::stoi(args.at("subsampling"));
+    }
+
     id_label = speech::load_label_set(args.at("label"));
     for (int i = 0; i < id_label.size(); ++i) {
         label_id[id_label[i]] = i;
@@ -251,8 +259,12 @@ void learning_env::run()
             frame_ops.push_back(f_var);
         }
 
-        std::shared_ptr<lstm::transcriber> trans
-            = lstm_frame::make_pyramid_transcriber(layer, dropout, &gen);
+        std::shared_ptr<lstm::transcriber> trans;
+        if (ebt::in(std::string("subsampling"), args)) {
+            trans = lstm_frame::make_pyramid_transcriber(layer, dropout, &gen);
+        } else {
+            trans = lstm_frame::make_transcriber(layer, dropout, &gen);
+        }
 
         if (ebt::in(std::string("logsoftmax"), args)) {
             trans = std::make_shared<lstm::logsoftmax_transcriber>(
@@ -286,8 +298,8 @@ void learning_env::run()
 
         std::vector<cost::segment<int>> gt_segs;
         for (auto& s: segs) {
-            gt_segs.push_back(cost::segment<int> {(long)(s.start_time / std::pow(2, layer - 1)),
-                (long)(s.end_time / std::pow(2, layer - 1)), label_id.at(s.label)});
+            gt_segs.push_back(cost::segment<int> {(long)(s.start_time / std::pow(2, subsampling)),
+                (long)(s.end_time / std::pow(2, subsampling)), label_id.at(s.label)});
         }
 
         if (args.at("loss") == "log-loss") {
