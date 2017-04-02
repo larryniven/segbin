@@ -74,6 +74,7 @@ int main(int argc, char *argv[])
             {"dropout", "", false},
             {"seed", "", false},
             {"shuffle", "", false},
+            {"logsoftmax", "", false},
             {"opt", "const-step,const-step-momentum,rmsprop,adagrad,adam", true},
             {"step-size", "", true},
             {"clip", "", false},
