@@ -52,6 +52,8 @@ int main(int argc, char *argv[])
             {"stride", "", false},
             {"param", "", true},
             {"features", "", true},
+            {"subsampling", "", false},
+            {"logsoftmax", "", false},
             {"label", "", true},
             {"print-path", "", false},
         }
@@ -134,10 +136,21 @@ void prediction_env::run()
                 la::vector<double>(frames[i]))));
         }
 
-        std::shared_ptr<lstm::transcriber> trans
-            = lstm_frame::make_pyramid_transcriber(layer, 0.0, nullptr);
+        std::shared_ptr<lstm::transcriber> trans;
 
-        frame_ops = (*trans)(var_tree->children[1]->children[0], frame_ops);
+        if (ebt::in(std::string("subsampling"), args)) {
+            trans = lstm_frame::make_pyramid_transcriber(layer, 0.0, nullptr);
+        } else {
+            trans = lstm_frame::make_transcriber(layer, 0.0, nullptr);
+        }
+
+        if (ebt::in(std::string("logsoftmax"), args)) {
+            trans = std::make_shared<lstm::logsoftmax_transcriber>(
+                lstm::logsoftmax_transcriber { trans });
+            frame_ops = (*trans)(var_tree->children[1], frame_ops);
+        } else {
+            frame_ops = (*trans)(var_tree->children[1]->children[0], frame_ops);
+        }
 
         seg::iseg_data graph_data;
         graph_data.fst = seg::make_graph(frame_ops.size(), label_id, id_label, min_seg, max_seg, stride);
