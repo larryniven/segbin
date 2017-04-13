@@ -3,8 +3,10 @@ CXXFLAGS += -std=c++11 -I .. -L ../speech -L ../nn -L ../autodiff -L ../opt -L .
 bin = \
     oracle-error \
     ctc-learn \
+    ctc-loss \
     ctc-predict \
     segrnn-learn \
+    segrnn-loss \
     segrnn-predict \
     segrnn-prune \
     segrnn-beam-prune \
@@ -12,6 +14,7 @@ bin = \
     segrnn-frame-learn \
     segrnn-ctc-learn \
     segrnn-sup-learn \
+    segrnn-sup-loss \
     seglin-learn \
     seglin-sup-learn \
     seglin-predict
@@ -48,6 +51,9 @@ oracle-cost: oracle-cost.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lsego -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 ctc-learn: ctc-learn.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lfst -lebt -lblas
+
+ctc-loss: ctc-loss.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lspeech -lnn -lautodiff -lopt -lla -lfst -lebt -lblas
 
 ctc-predict: ctc-predict.o
@@ -89,6 +95,9 @@ overlap-vs-per: overlap-vs-per.o
 segrnn-learn: segrnn-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
+segrnn-loss: segrnn-loss.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
 segrnn-predict: segrnn-predict.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
@@ -123,6 +132,9 @@ segrnn-ctc-learn: segrnn-ctc-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-sup-learn: segrnn-sup-learn.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+segrnn-sup-loss: segrnn-sup-loss.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 seglin-learn: seglin-learn.o
