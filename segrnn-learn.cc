@@ -76,6 +76,7 @@ int main(int argc, char *argv[])
             {"shuffle", "", false},
             {"logsoftmax", "", false},
             {"subsampling", "", false},
+            {"type", "std,std-1b", false},
             {"opt", "const-step,const-step-momentum,rmsprop,adagrad,adam", true},
             {"step-size", "", true},
             {"clip", "", false},
@@ -238,12 +239,21 @@ void learning_env::run()
         std::shared_ptr<tensor_tree::vertex> var_tree
             = tensor_tree::make_var_tree(comp_graph, param);
 
-        std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
+        std::vector<double> frame_cat;
+        frame_cat.reserve(frames.size() * frames.front().size());
+
         for (int i = 0; i < frames.size(); ++i) {
-            auto f_var = comp_graph.var(la::tensor<double>(
-                la::vector<double>(frames[i])));
-            frame_ops.push_back(f_var);
+            frame_cat.insert(frame_cat.end(), frames[i].begin(), frames[i].end());
         }
+
+        unsigned int nframes = frames.size();
+        unsigned int ndim = frames.front().size();
+
+        std::shared_ptr<autodiff::op_t> input
+            = comp_graph.var(la::cpu::weak_tensor<double>(
+                frame_cat.data(), { nframes, ndim }));
+
+        input->grad_needed = false;
 
         std::shared_ptr<lstm::transcriber> trans;
         if (ebt::in(std::string("subsampling"), args)) {
@@ -252,39 +262,52 @@ void learning_env::run()
             trans = lstm_frame::make_transcriber(layer, dropout, &gen);
         }
 
+        std::shared_ptr<autodiff::op_t> hidden;
+        std::shared_ptr<autodiff::op_t> ignore;
+
         if (ebt::in(std::string("logsoftmax"), args)) {
             trans = std::make_shared<lstm::logsoftmax_transcriber>(
                 lstm::logsoftmax_transcriber { trans });
-            frame_ops = (*trans)(var_tree->children[1], frame_ops);
+            std::tie(hidden, ignore) = (*trans)(var_tree->children[1], input);
         } else {
-            frame_ops = (*trans)(var_tree->children[1]->children[0], frame_ops);
+            std::tie(hidden, ignore) = (*trans)(var_tree->children[1]->children[0], input);
         }
 
-        std::cout << "frames: " << frames.size() << " downsampled: " << frame_ops.size() << std::endl;
+        auto& hidden_t = autodiff::get_output<la::cpu::tensor_like<double>>(hidden);
 
-        if (frame_ops.size() < label_seq.size()) {
+        std::cout << "frames: " << frames.size() << " downsampled: " << hidden_t.size(0) << std::endl;
+
+        if (hidden_t.size(0) < label_seq.size()) {
             ++nsample;
             continue;
         }
 
         seg::iseg_data graph_data;
-        graph_data.fst = seg::make_graph(frame_ops.size(), label_id, id_label, min_seg, max_seg, stride);
+        graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride);
         graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
 
-        auto frame_mat = autodiff::row_cat(frame_ops);
-
         if (ebt::in(std::string("dropout"), args)) {
-            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], frame_mat,
+            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], hidden,
                 dropout, &gen);
         } else {
-            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], frame_mat);
+            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], hidden);
         }
 
         seg::loss_func *loss_func;
 
-        ifst::fst label_fst = seg::make_label_fst(label_seq, label_id, id_label);
+        std::shared_ptr<ifst::fst> label_fst;
+        if (args.at("type") == "std") {
+            label_fst = std::make_shared<ifst::fst>(
+                seg::make_label_fst(label_seq, label_id, id_label));
+        } else if (args.at("type") == "std") {
+            label_fst = std::make_shared<ifst::fst>(
+                seg::make_label_fst_1b(label_seq, label_id, id_label));
+        } else {
+            std::cout << "unknown type " << args.at("type") << std::endl;
+            exit(1);
+        }
 
-        loss_func = new seg::marginal_log_loss { graph_data, label_fst };
+        loss_func = new seg::marginal_log_loss { graph_data, *label_fst };
 
         double ell = loss_func->loss();
 
@@ -301,7 +324,7 @@ void learning_env::run()
 
             std::vector<std::shared_ptr<autodiff::op_t>> topo_order;
 
-            for (int i = frame_mat->id; i >= 0; --i) {
+            for (int i = hidden->id; i >= 0; --i) {
                 topo_order.push_back(comp_graph.vertices.at(i));
             }
 

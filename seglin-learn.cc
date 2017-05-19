@@ -209,38 +209,38 @@ void learning_env::run()
         std::cout << "sample: " << nsample + 1 << std::endl;
         std::cout << "gold len: " << label_seq.size() << std::endl;
 
-        autodiff::computation_graph comp_graph;
-        std::shared_ptr<tensor_tree::vertex> var_tree
-            = tensor_tree::make_var_tree(comp_graph, param);
+        std::cout << "frames: " << frames.size() << std::endl;
 
-        std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
-        if (ebt::in(std::string("dropout"), args)) {
-            for (int i = 0; i < frames.size(); ++i) {
-                auto f_var = comp_graph.var(la::tensor<double>(
-                    la::vector<double>(frames[i])));
-                auto mask = autodiff::dropout_mask(f_var, dropout, gen);
-                frame_ops.push_back(autodiff::emul(f_var, mask));
-            }
-        } else {
-            for (int i = 0; i < frames.size(); ++i) {
-                auto f_var = comp_graph.var(la::tensor<double>(
-                    la::vector<double>(frames[i])));
-                frame_ops.push_back(f_var);
-            }
-        }
-
-        std::cout << "frames: " << frame_ops.size() << std::endl;
-
-        if (frame_ops.size() < label_seq.size()) {
+        if (frames.size() < label_seq.size()) {
             ++nsample;
             continue;
         }
 
-        seg::iseg_data graph_data;
-        graph_data.fst = seg::make_graph(frame_ops.size(), label_id, id_label, min_seg, max_seg, stride);
-        graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
+        autodiff::computation_graph comp_graph;
+        std::shared_ptr<tensor_tree::vertex> var_tree
+            = tensor_tree::make_var_tree(comp_graph, param);
 
-        auto frame_mat = autodiff::row_cat(frame_ops);
+        std::vector<double> frame_cat;
+        frame_cat.reserve(frames.size() * frames.front().size());
+
+        for (int i = 0; i < frames.size(); ++i) {
+            frame_cat.insert(frame_cat.end(), frames[i].begin(), frames[i].end());
+        }
+
+        unsigned int nframes = frames.size();
+        unsigned int ndim = frames.front().size();
+
+        std::shared_ptr<autodiff::op_t> frame_mat = comp_graph.var(la::cpu::weak_tensor<double>(
+            frame_cat.data(), { nframes, ndim }));
+
+        if (ebt::in(std::string("dropout"), args)) {
+            auto d_mask = autodiff::dropout_mask(frame_mat, dropout, gen);
+            frame_mat = autodiff::emul(d_mask, frame_mat);
+        }
+
+        seg::iseg_data graph_data;
+        graph_data.fst = seg::make_graph(frames.size(), label_id, id_label, min_seg, max_seg, stride);
+        graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
 
         if (ebt::in(std::string("dropout"), args)) {
             graph_data.weight_func = seg::make_weights(features, var_tree, frame_mat,

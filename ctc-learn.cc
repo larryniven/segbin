@@ -5,6 +5,9 @@
 #include "seg/loss.h"
 #include "seg/ctc.h"
 #include "nn/lstm-frame.h"
+#include <sstream>
+
+using namespace std::string_literals;
 
 struct learning_env {
 
@@ -28,6 +31,8 @@ struct learning_env {
     std::unordered_map<std::string, int> label_id;
     std::vector<std::string> id_label;
 
+    std::vector<int> indices;
+
     std::shared_ptr<tensor_tree::optimizer> opt;
 
     std::unordered_map<std::string, std::string> args;
@@ -48,22 +53,22 @@ int main(int argc, char *argv[])
             {"label-batch", "", true},
             {"param", "", true},
             {"opt-data", "", true},
-            {"step-size", "", true},
             {"output-param", "", false},
             {"output-opt-data", "", false},
             {"label", "", true},
-            {"clip", "", false},
             {"dropout", "", false},
             {"seed", "", false},
             {"subsampling", "", false},
-            {"output-dropout", "", false},
             {"shuffle", "", false},
             {"opt", "const-step,rmsprop,adagrad,adam", true},
+            {"step-size", "", true},
+            {"clip", "", false},
             {"decay", "", false},
             {"momentum", "", false},
             {"beta1", "", false},
             {"beta2", "", false},
-            {"type", "ctc,hmm1s,hmm2s", true}
+            {"type", "ctc,ctc-1b,hmm1s,hmm2s", true},
+            {"random-state", "", false}
         }
     };
 
@@ -123,8 +128,12 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
 
     gen = std::default_random_engine { seed };
 
+    if (ebt::in("random-state"s, args)) {
+        std::istringstream iss { args.at("random-state") };
+        iss >> gen;
+    }
+
     if (ebt::in(std::string("shuffle"), args)) {
-        std::vector<int> indices;
         indices.resize(frame_batch.pos.size());
 
         for (int i = 0; i < indices.size(); ++i) {
@@ -193,15 +202,26 @@ void learning_env::run()
         std::shared_ptr<tensor_tree::vertex> var_tree
             = tensor_tree::make_var_tree(comp_graph, param);
 
-        std::shared_ptr<tensor_tree::vertex> lstm_var_tree = tensor_tree::make_var_tree(comp_graph, param);
+        std::shared_ptr<tensor_tree::vertex> lstm_var_tree
+            = tensor_tree::make_var_tree(comp_graph, param);
 
-        std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
+        std::vector<double> frame_cat;
+        frame_cat.reserve(frames.size() * frames.front().size());
+
         for (int i = 0; i < frames.size(); ++i) {
-            auto f_var = comp_graph.var(la::tensor<double>(
-                la::vector<double>(frames[i])));
-            f_var->grad_needed = false;
-            frame_ops.push_back(f_var);
+            frame_cat.insert(frame_cat.end(), frames[i].begin(), frames[i].end());
         }
+
+        unsigned int nframes = frames.size();
+        unsigned int ndim = frames.front().size();
+
+        std::shared_ptr<autodiff::op_t> input
+            = comp_graph.var(la::cpu::weak_tensor<double>(
+                frame_cat.data(), { nframes, ndim }));
+
+        input->grad_needed = false;
+
+        std::cout << "random: " << gen << std::endl;
 
         std::shared_ptr<lstm::transcriber> trans;
 
@@ -213,24 +233,31 @@ void learning_env::run()
 
         trans = std::make_shared<lstm::logsoftmax_transcriber>(
             lstm::logsoftmax_transcriber { trans });
-        frame_ops = (*trans)(lstm_var_tree, frame_ops);
 
-        std::cout << "frames: " << frames.size() << " downsampled: " << frame_ops.size() << std::endl;
+        std::shared_ptr<autodiff::op_t> logprob;
+        std::shared_ptr<autodiff::op_t> ignore;
+        std::tie(logprob, ignore) = (*trans)(lstm_var_tree, input);
 
-        if (frame_ops.size() < label_seq.size()) {
+        auto& logprob_t = autodiff::get_output<la::cpu::tensor_like<double>>(logprob);
+
+        std::cout << "frames: " << frames.size() << " downsampled: " << logprob_t.size(0) << std::endl;
+
+        if (logprob_t.size(0) < label_seq.size()) {
             continue;
         }
 
-        ifst::fst graph_fst = ctc::make_frame_fst(frame_ops.size(), label_id, id_label);
+        ifst::fst graph_fst = ctc::make_frame_fst(logprob_t.size(0), label_id, id_label);
 
         seg::iseg_data graph_data;
         graph_data.fst = std::make_shared<ifst::fst>(graph_fst);
-        graph_data.weight_func = std::make_shared<ctc::label_weight>(ctc::label_weight(frame_ops));
+        graph_data.weight_func = std::make_shared<ctc::label_weight>(ctc::label_weight(logprob));
 
         ifst::fst label_fst;
 
         if (args.at("type") == "ctc") {
             label_fst = ctc::make_label_fst(label_id_seq, label_id, id_label);
+        } else if (args.at("type") == "ctc-1b") {
+            label_fst = ctc::make_label_fst_1b(label_id_seq, label_id, id_label);
         } else if (args.at("type") == "hmm1s") {
             label_fst = ctc::make_label_fst_hmm1s(label_id_seq, label_id, id_label);
         } else if (args.at("type") == "hmm2s") {
@@ -291,6 +318,22 @@ void learning_env::run()
 
         if (ell < 0) {
             std::cout << "loss is less than zero.  skipping." << std::endl;
+
+#if 0
+            std::cout << "sample: " << indices[nsample] << std::endl;
+
+            std::ofstream param_ofs { "param-debug" };
+            param_ofs << layer << std::endl;
+            tensor_tree::save_tensor(param, param_ofs);
+            param_ofs.close();
+
+            std::ofstream opt_data_ofs { "opt-data-debug" };
+            opt_data_ofs << layer << std::endl;
+            opt->save_opt_data(opt_data_ofs);
+            opt_data_ofs.close();
+
+            exit(1);
+#endif
         }
 
         double n = tensor_tree::norm(param);

@@ -109,18 +109,22 @@ void prediction_env::run()
         std::shared_ptr<tensor_tree::vertex> var_tree
             = tensor_tree::make_var_tree(comp_graph, param);
 
-        std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
+        std::vector<double> frame_cat;
+        frame_cat.reserve(frames.size() * frames.front().size());
+
         for (int i = 0; i < frames.size(); ++i) {
-            auto f_var = comp_graph.var(la::tensor<double>(
-                la::vector<double>(frames[i])));
-            frame_ops.push_back(f_var);
+            frame_cat.insert(frame_cat.end(), frames[i].begin(), frames[i].end());
         }
 
-        seg::iseg_data graph_data;
-        graph_data.fst = seg::make_graph(frame_ops.size(), label_id, id_label, min_seg, max_seg, stride);
-        graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
+        unsigned int nframes = frames.size();
+        unsigned int ndim = frames.front().size();
 
-        auto frame_mat = autodiff::row_cat(frame_ops);
+        std::shared_ptr<autodiff::op_t> frame_mat = comp_graph.var(la::cpu::weak_tensor<double>(
+            frame_cat.data(), { nframes, ndim }));
+
+        seg::iseg_data graph_data;
+        graph_data.fst = seg::make_graph(frames.size(), label_id, id_label, min_seg, max_seg, stride);
+        graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
 
         graph_data.weight_func = seg::make_weights(features, var_tree, frame_mat);
 

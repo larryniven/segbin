@@ -100,13 +100,19 @@ void prediction_env::run()
         std::shared_ptr<tensor_tree::vertex> lstm_var_tree
             = tensor_tree::make_var_tree(comp_graph, param);
 
-        std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
+        std::vector<double> frame_cat;
+        frame_cat.reserve(frames.size() * frames.front().size());
+
         for (int i = 0; i < frames.size(); ++i) {
-            auto f_var = comp_graph.var(la::tensor<double>(
-                la::vector<double>(frames[i])));
-            f_var->grad_needed = false;
-            frame_ops.push_back(f_var);
+            frame_cat.insert(frame_cat.end(), frames[i].begin(), frames[i].end());
         }
+
+        unsigned int nframes = frames.size();
+        unsigned int ndim = frames.front().size();
+
+        std::shared_ptr<autodiff::op_t> input
+            = comp_graph.var(la::cpu::weak_tensor<double>(
+                frame_cat.data(), { nframes, ndim }));
 
         std::shared_ptr<lstm::transcriber> trans;
 
@@ -118,14 +124,19 @@ void prediction_env::run()
 
         trans = std::make_shared<lstm::logsoftmax_transcriber>(
             lstm::logsoftmax_transcriber { trans });
-        frame_ops = (*trans)(lstm_var_tree, frame_ops);
 
-        ifst::fst graph_fst = ctc::make_frame_fst(frame_ops.size(), label_id, id_label);
+        std::shared_ptr<autodiff::op_t> logprob;
+        std::shared_ptr<autodiff::op_t> ignore;
+        std::tie(logprob, ignore) = (*trans)(lstm_var_tree, input);
+
+        auto& logprob_t = autodiff::get_output<la::cpu::tensor_like<double>>(logprob);
+
+        ifst::fst graph_fst = ctc::make_frame_fst(logprob_t.size(0), label_id, id_label);
 
         seg::iseg_data graph_data;
         graph_data.fst = std::make_shared<ifst::fst>(graph_fst);
         graph_data.weight_func = std::make_shared<ctc::label_weight>(
-            ctc::label_weight(frame_ops));
+            ctc::label_weight(logprob));
 
         seg::seg_fst<seg::iseg_data> graph { graph_data };
 
