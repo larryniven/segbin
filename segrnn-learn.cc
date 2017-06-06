@@ -77,6 +77,7 @@ int main(int argc, char *argv[])
             {"logsoftmax", "", false},
             {"subsampling", "", false},
             {"type", "std,std-1b", false},
+            {"len-norm", "", false},
             {"opt", "const-step,const-step-momentum,rmsprop,adagrad,adam", true},
             {"step-size", "", true},
             {"clip", "", false},
@@ -318,7 +319,13 @@ void learning_env::run()
             = make_tensor_tree(features, layer);
 
         if (ell > 0) {
-            loss_func->grad();
+            double grad_scale = 1;
+
+            if (ebt::in(std::string("len-norm"), args)) {
+                grad_scale = 1.0 / label_seq.size();
+            }
+
+            loss_func->grad(grad_scale);
 
             graph_data.weight_func->grad();
 
