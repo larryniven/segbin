@@ -41,6 +41,9 @@ struct learning_env {
     double clip;
     double step_size;
 
+    int nsegs;
+    double trim_prob;
+
     std::vector<std::string> id_label;
     std::unordered_map<std::string, int> label_id;
 
@@ -57,11 +60,13 @@ struct learning_env {
 int main(int argc, char *argv[])
 {
     ebt::ArgumentSpec spec {
-        "segrnn-learn",
+        "segrnn-forward-learn",
         "Learn segmental RNN",
         {
             {"frame-batch", "", true},
             {"label-batch", "", true},
+            {"nsegs", "", true},
+            {"trim-prob", "", true},
             {"min-seg", "", false},
             {"max-seg", "", false},
             {"stride", "", false},
@@ -76,7 +81,6 @@ int main(int argc, char *argv[])
             {"shuffle", "", false},
             {"logsoftmax", "", false},
             {"subsampling", "", false},
-            {"type", "std,std-1b", false},
             {"opt", "const-step,const-step-momentum,rmsprop,adagrad,adam", true},
             {"step-size", "", true},
             {"clip", "", false},
@@ -158,6 +162,9 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         stride = std::stoi(args.at("stride"));
     }
 
+    nsegs = std::stoi(args.at("nsegs"));
+    trim_prob = std::stod(args.at("trim-prob"));
+
     seed = 1;
     if (ebt::in(std::string("seed"), args)) {
         seed = std::stoi(args.at("seed"));
@@ -232,6 +239,23 @@ void learning_env::run()
 
         std::vector<int> label_seq = speech::load_label_seq_batch(label_batch.at(nsample), label_id);
 
+        std::bernoulli_distribution dist { trim_prob };
+
+        bool trim = dist(gen);
+
+        if (trim) {
+            while (label_seq.size() > nsegs) {
+                label_seq.pop_back();
+            }
+
+            int max_frames = (ebt::in(std::string("subsampling"), args) ?
+                nsegs * max_seg * std::pow(2, layer - 1) : nsegs * max_seg);
+
+            while (frames.size() > max_frames) {
+                frames.pop_back();
+            }
+        }
+
         std::cout << "sample: " << nsample + 1 << std::endl;
         std::cout << "gold len: " << label_seq.size() << std::endl;
 
@@ -283,7 +307,8 @@ void learning_env::run()
         }
 
         seg::iseg_data graph_data;
-        graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride);
+        graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label,
+            min_seg, max_seg, stride);
         graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
 
         if (ebt::in(std::string("dropout"), args)) {
@@ -295,17 +320,8 @@ void learning_env::run()
 
         seg::loss_func *loss_func;
 
-        std::shared_ptr<ifst::fst> label_fst;
-        if (args.at("type") == "std") {
-            label_fst = std::make_shared<ifst::fst>(
-                seg::make_label_fst(label_seq, label_id, id_label));
-        } else if (args.at("type") == "std-1b") {
-            label_fst = std::make_shared<ifst::fst>(
-                seg::make_label_fst_1b(label_seq, label_id, id_label));
-        } else {
-            std::cout << "unknown type " << args.at("type") << std::endl;
-            exit(1);
-        }
+        std::shared_ptr<ifst::fst> label_fst = std::make_shared<ifst::fst>(
+            seg::make_forward_label_fst(label_seq, label_id, id_label));
 
         loss_func = new seg::marginal_log_loss { graph_data, *label_fst };
 
@@ -318,7 +334,7 @@ void learning_env::run()
             = make_tensor_tree(features, layer);
 
         if (ell > 0) {
-            loss_func->grad();
+            loss_func->grad(1.0 / label_seq.size());
 
             graph_data.weight_func->grad();
 
