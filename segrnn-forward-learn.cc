@@ -334,7 +334,7 @@ void learning_env::run()
             = make_tensor_tree(features, layer);
 
         if (ell > 0) {
-            loss_func->grad(1.0 / label_seq.size());
+            loss_func->grad();
 
             graph_data.weight_func->grad();
 

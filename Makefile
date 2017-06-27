@@ -18,7 +18,8 @@ bin = \
     seglin-learn \
     seglin-sup-learn \
     seglin-predict \
-    segrnn-forward-learn
+    segrnn-forward-learn \
+    segrnn-seg-learn
 
     # segrnn-cascade-learn \
     # segrnn-cascade-predict \
@@ -148,5 +149,8 @@ seglin-sup-learn: seglin-sup-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 seglin-predict: seglin-predict.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+segrnn-seg-learn: segrnn-seg-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 

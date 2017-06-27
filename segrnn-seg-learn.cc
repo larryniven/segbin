@@ -59,7 +59,7 @@ struct learning_env {
 int main(int argc, char *argv[])
 {
     ebt::ArgumentSpec spec {
-        "segrnn-learn",
+        "segrnn-seg-learn",
         "Learn segmental RNN",
         {
             {"frame-batch", "", true},
@@ -72,7 +72,6 @@ int main(int argc, char *argv[])
             {"features", "", true},
             {"output-param", "", false},
             {"output-opt-data", "", false},
-            {"label", "", true},
             {"dropout", "", false},
             {"seed", "", false},
             {"shuffle", "", false},
@@ -169,7 +168,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
 
     gen = std::default_random_engine{seed};
 
-    id_label = speech::load_label_set(args.at("label"));
+    id_label = std::vector<std::string> { "<eps>", "<seg>" };
     for (int i = 0; i < id_label.size(); ++i) {
         label_id[id_label[i]] = i;
     }
@@ -237,7 +236,10 @@ void learning_env::run()
 
         std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_batch.at(nsample));
 
-        std::vector<int> label_seq = speech::load_label_seq_batch(label_batch.at(nsample), label_id);
+        std::vector<std::string> label_seq_str = speech::load_label_seq_batch(label_batch.at(nsample));
+
+        std::vector<int> label_seq;
+        label_seq.resize(label_seq_str.size(), 1);
 
         std::cout << "sample: " << nsample + 1 << std::endl;
         std::cout << "gold len: " << label_seq.size() << std::endl;
