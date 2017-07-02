@@ -21,6 +21,8 @@ struct learning_env {
     std::shared_ptr<tensor_tree::vertex> param;
     std::shared_ptr<tensor_tree::vertex> opt_data;
 
+    int cell_dim;
+
     double step_size;
     double dropout;
     double clip;
@@ -60,6 +62,7 @@ int main(int argc, char *argv[])
             {"seed", "", false},
             {"subsampling", "", false},
             {"shuffle", "", false},
+            {"dyer-lstm", "", false},
             {"opt", "const-step,rmsprop,adagrad,adam", true},
             {"step-size", "", true},
             {"clip", "", false},
@@ -101,9 +104,21 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     std::string line;
     std::getline(param_ifs, line);
     layer = std::stoi(line);
-    param = lstm_frame::make_tensor_tree(layer);
+    if (ebt::in(std::string("dyer-lstm"), args)) {
+        param = lstm_frame::make_dyer_tensor_tree(layer);
+    } else {
+        param = lstm_frame::make_tensor_tree(layer);
+    }
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
+
+    if (ebt::in(std::string("dyer-lstm"), args)) {
+        cell_dim = tensor_tree::get_tensor(param->children[0]
+            ->children[0]->children[0]->children[0]).size(1) / 3;
+    } else {
+        cell_dim = tensor_tree::get_tensor(param->children[0]
+            ->children[0]->children[0]->children[0]).size(1) / 4;
+    }
 
     step_size = std::stod(args.at("step-size"));
 
@@ -228,7 +243,11 @@ void learning_env::run()
         if (ebt::in(std::string("subsampling"), args)) {
             trans = lstm_frame::make_pyramid_transcriber(layer, dropout, &gen);
         } else {
-            trans = lstm_frame::make_transcriber(layer, dropout, &gen);
+            if (ebt::in(std::string("dyer-lstm"), args)) {
+                trans = lstm_frame::make_dyer_transcriber(layer, dropout, &gen);
+            } else {
+                trans = lstm_frame::make_transcriber(layer, dropout, &gen);
+            }
         }
 
         trans = std::make_shared<lstm::logsoftmax_transcriber>(
@@ -236,7 +255,7 @@ void learning_env::run()
 
         std::shared_ptr<autodiff::op_t> logprob;
         std::shared_ptr<autodiff::op_t> ignore;
-        std::tie(logprob, ignore) = (*trans)(lstm_var_tree, input);
+        std::tie(logprob, ignore) = (*trans)(frames.size(), 1, cell_dim, lstm_var_tree, input);
 
         auto& logprob_t = autodiff::get_output<la::cpu::tensor_like<double>>(logprob);
 
@@ -248,9 +267,12 @@ void learning_env::run()
 
         ifst::fst graph_fst = ctc::make_frame_fst(logprob_t.size(0), label_id, id_label);
 
+        auto& logprob_mat = logprob_t.as_matrix();
+        auto logprob_m = autodiff::weak_var(logprob, 0, std::vector<unsigned int> { logprob_mat.rows(), logprob_mat.cols() });
+
         seg::iseg_data graph_data;
         graph_data.fst = std::make_shared<ifst::fst>(graph_fst);
-        graph_data.weight_func = std::make_shared<ctc::label_weight>(ctc::label_weight(logprob));
+        graph_data.weight_func = std::make_shared<ctc::label_weight>(ctc::label_weight(logprob_m));
 
         ifst::fst label_fst;
 
@@ -274,8 +296,13 @@ void learning_env::run()
         std::cout << "loss: " << ell << std::endl;
         std::cout << "E: " << ell / label_seq.size() << std::endl;
 
-        std::shared_ptr<tensor_tree::vertex> param_grad
-            = lstm_frame::make_tensor_tree(layer);
+        std::shared_ptr<tensor_tree::vertex> param_grad;
+
+        if (ebt::in(std::string("dyer-lstm"), args)) {
+            param_grad = lstm_frame::make_dyer_tensor_tree(layer);
+        } else {
+            param_grad = lstm_frame::make_tensor_tree(layer);
+        }
 
         if (ell > 0) {
             loss.grad();
@@ -358,7 +385,6 @@ void learning_env::run()
     param_ofs.close();
 
     std::ofstream opt_data_ofs { args.at("output-opt-data") };
-    opt_data_ofs << layer << std::endl;
     opt->save_opt_data(opt_data_ofs);
     opt_data_ofs.close();
 

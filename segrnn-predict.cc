@@ -4,6 +4,18 @@
 #include "nn/lstm-frame.h"
 #include <fstream>
 
+std::shared_ptr<tensor_tree::vertex> make_dyer_tensor_tree(
+    std::vector<std::string> const& features,
+    int layer)
+{
+    tensor_tree::vertex root;
+
+    root.children.push_back(seg::make_tensor_tree(features));
+    root.children.push_back(lstm_frame::make_dyer_tensor_tree(layer));
+
+    return std::make_shared<tensor_tree::vertex>(root);
+}
+
 std::shared_ptr<tensor_tree::vertex> make_tensor_tree(
     std::vector<std::string> const& features,
     int layer)
@@ -28,6 +40,8 @@ struct prediction_env {
 
     int layer;
     std::shared_ptr<tensor_tree::vertex> param;
+
+    int cell_dim;
 
     std::vector<std::string> id_label;
     std::unordered_map<std::string, int> label_id;
@@ -89,9 +103,21 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
     std::string line;
     std::getline(param_ifs, line);
     layer = std::stoi(line);
-    param = make_tensor_tree(features, layer);
+    if (ebt::in(std::string("dyer-lstm"), args)) {
+        param = make_dyer_tensor_tree(features, layer);
+    } else {
+        param = make_tensor_tree(features, layer);
+    }
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
+
+    if (ebt::in(std::string("dyer-lstm"), args)) {
+        cell_dim = tensor_tree::get_tensor(param->children[1]->children[0]
+            ->children[0]->children[0]->children[0]).size(1) / 3;
+    } else {
+        cell_dim = tensor_tree::get_tensor(param->children[1]->children[0]
+            ->children[0]->children[0]->children[0]).size(1) / 4;
+    }
 
     max_seg = 20;
     if (ebt::in(std::string("max-seg"), args)) {
@@ -151,7 +177,11 @@ void prediction_env::run()
         if (ebt::in(std::string("subsampling"), args)) {
             trans = lstm_frame::make_pyramid_transcriber(layer, 0.0, nullptr);
         } else {
-            trans = lstm_frame::make_transcriber(layer, 0.0, nullptr);
+            if (ebt::in(std::string("dyer-lstm"), args)) {
+                trans = lstm_frame::make_dyer_transcriber(layer, 0.0, nullptr);
+            } else {
+                trans = lstm_frame::make_transcriber(layer, 0.0, nullptr);
+            }
         }
 
         std::shared_ptr<autodiff::op_t> hidden;
@@ -160,18 +190,24 @@ void prediction_env::run()
         if (ebt::in(std::string("logsoftmax"), args)) {
             trans = std::make_shared<lstm::logsoftmax_transcriber>(
                 lstm::logsoftmax_transcriber { trans });
-            std::tie(hidden, ignore) = (*trans)(var_tree->children[1], input);
+            std::tie(hidden, ignore) = (*trans)(frames.size(), 1, cell_dim,
+                var_tree->children[1], input);
         } else {
-            std::tie(hidden, ignore) = (*trans)(var_tree->children[1]->children[0], input);
+            std::tie(hidden, ignore) = (*trans)(frames.size(), 1, cell_dim,
+                var_tree->children[1]->children[0], input);
         }
 
         auto& hidden_t = autodiff::get_output<la::cpu::tensor_like<double>>(hidden);
+
+        auto& hidden_mat = hidden_t.as_matrix();
+        auto hidden_m = autodiff::weak_var(hidden, 0,
+            std::vector<unsigned int> { hidden_mat.rows(), hidden_mat.cols() });
 
         seg::iseg_data graph_data;
         graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride);
         graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
 
-        graph_data.weight_func = seg::make_weights(features, var_tree->children[0], hidden);
+        graph_data.weight_func = seg::make_weights(features, var_tree->children[0], hidden_m);
 
         seg::seg_fst<seg::iseg_data> graph { graph_data };
 

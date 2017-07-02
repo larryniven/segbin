@@ -13,6 +13,8 @@ struct prediction_env {
     int layer;
     std::shared_ptr<tensor_tree::vertex> param;
 
+    int cell_dim;
+
     std::unordered_map<std::string, int> label_id;
     std::vector<std::string> id_label;
 
@@ -34,6 +36,7 @@ int main(int argc, char *argv[])
             {"param", "", true},
             {"label", "", true},
             {"subsampling", "", false},
+            {"dyer-lstm", "", false},
             {"rmdup", "", false},
             {"beam-search", "", false},
             {"beam-width", "", false},
@@ -69,9 +72,21 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
     std::string line;
     std::getline(param_ifs, line);
     layer = std::stoi(line);
-    param = lstm_frame::make_tensor_tree(layer);
+    if (ebt::in(std::string("dyer-lstm"), args)) {
+        param = lstm_frame::make_dyer_tensor_tree(layer);
+    } else {
+        param = lstm_frame::make_tensor_tree(layer);
+    }
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
+
+    if (ebt::in(std::string("dyer-lstm"), args)) {
+        cell_dim = tensor_tree::get_tensor(param->children[0]
+            ->children[0]->children[0]->children[0]).size(1) / 3;
+    } else {
+        cell_dim = tensor_tree::get_tensor(param->children[0]
+            ->children[0]->children[0]->children[0]).size(1) / 4;
+    }
 
     id_label = speech::load_label_set(args.at("label"));
     for (int i = 0; i < id_label.size(); ++i) {
@@ -119,7 +134,11 @@ void prediction_env::run()
         if (ebt::in(std::string("subsampling"), args)) {
             trans = lstm_frame::make_pyramid_transcriber(layer, 0.0, nullptr);
         } else {
-            trans = lstm_frame::make_transcriber(layer, 0.0, nullptr);
+            if (ebt::in(std::string("dyer-lstm"), args)) {
+                trans = lstm_frame::make_dyer_transcriber(layer, 0.0, nullptr);
+            } else {
+                trans = lstm_frame::make_transcriber(layer, 0.0, nullptr);
+            }
         }
 
         trans = std::make_shared<lstm::logsoftmax_transcriber>(
@@ -127,16 +146,19 @@ void prediction_env::run()
 
         std::shared_ptr<autodiff::op_t> logprob;
         std::shared_ptr<autodiff::op_t> ignore;
-        std::tie(logprob, ignore) = (*trans)(lstm_var_tree, input);
+        std::tie(logprob, ignore) = (*trans)(frames.size(), 1, cell_dim, lstm_var_tree, input);
 
         auto& logprob_t = autodiff::get_output<la::cpu::tensor_like<double>>(logprob);
 
         ifst::fst graph_fst = ctc::make_frame_fst(logprob_t.size(0), label_id, id_label);
 
+        auto& logprob_mat = logprob_t.as_matrix();
+        auto logprob_m = autodiff::weak_var(logprob, 0, std::vector<unsigned int> { logprob_mat.rows(), logprob_mat.cols() });
+
         seg::iseg_data graph_data;
         graph_data.fst = std::make_shared<ifst::fst>(graph_fst);
         graph_data.weight_func = std::make_shared<ctc::label_weight>(
-            ctc::label_weight(logprob));
+            ctc::label_weight(logprob_m));
 
         seg::seg_fst<seg::iseg_data> graph { graph_data };
 

@@ -5,6 +5,18 @@
 #include "seg/loss.h"
 #include "nn/lstm-frame.h"
 
+std::shared_ptr<tensor_tree::vertex> make_dyer_tensor_tree(
+    std::vector<std::string> const& features,
+    int layer)
+{
+    tensor_tree::vertex root;
+
+    root.children.push_back(seg::make_tensor_tree(features));
+    root.children.push_back(lstm_frame::make_dyer_tensor_tree(layer));
+
+    return std::make_shared<tensor_tree::vertex>(root);
+}
+
 std::shared_ptr<tensor_tree::vertex> make_tensor_tree(
     std::vector<std::string> const& features,
     int layer)
@@ -36,6 +48,8 @@ struct learning_env {
 
     int layer;
     std::shared_ptr<tensor_tree::vertex> param;
+
+    int cell_dim;
 
     double dropout;
     double clip;
@@ -70,6 +84,7 @@ int main(int argc, char *argv[])
             {"param", "", true},
             {"opt-data", "", true},
             {"features", "", true},
+            {"dyer-lstm", "", false},
             {"output-param", "", false},
             {"output-opt-data", "", false},
             {"label", "", true},
@@ -122,9 +137,21 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     std::string line;
     std::getline(param_ifs, line);
     layer = std::stoi(line);
-    param = make_tensor_tree(features, layer);
+    if (ebt::in(std::string("dyer-lstm"), args)) {
+        param = make_dyer_tensor_tree(features, layer);
+    } else {
+        param = make_tensor_tree(features, layer);
+    }
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
+
+    if (ebt::in(std::string("dyer-lstm"), args)) {
+        cell_dim = tensor_tree::get_tensor(param->children[1]->children[0]
+            ->children[0]->children[0]->children[0]).size(1) / 3;
+    } else {
+        cell_dim = tensor_tree::get_tensor(param->children[1]->children[0]
+            ->children[0]->children[0]->children[0]).size(1) / 4;
+    }
 
     output_param = "param-last";
     if (ebt::in(std::string("output-param"), args)) {
@@ -266,7 +293,11 @@ void learning_env::run()
         if (ebt::in(std::string("subsampling"), args)) {
             trans = lstm_frame::make_pyramid_transcriber(layer, dropout, &gen);
         } else {
-            trans = lstm_frame::make_transcriber(layer, dropout, &gen);
+            if (ebt::in(std::string("dyer-lstm"), args)) {
+                trans = lstm_frame::make_dyer_transcriber(layer, dropout, &gen);
+            } else {
+                trans = lstm_frame::make_transcriber(layer, dropout, &gen);
+            }
         }
 
         std::shared_ptr<autodiff::op_t> hidden;
@@ -275,9 +306,9 @@ void learning_env::run()
         if (ebt::in(std::string("logsoftmax"), args)) {
             trans = std::make_shared<lstm::logsoftmax_transcriber>(
                 lstm::logsoftmax_transcriber { trans });
-            std::tie(hidden, ignore) = (*trans)(var_tree->children[1], input);
+            std::tie(hidden, ignore) = (*trans)(frames.size(), 1, cell_dim, var_tree->children[1], input);
         } else {
-            std::tie(hidden, ignore) = (*trans)(var_tree->children[1]->children[0], input);
+            std::tie(hidden, ignore) = (*trans)(frames.size(), 1, cell_dim, var_tree->children[1]->children[0], input);
         }
 
         auto& hidden_t = autodiff::get_output<la::cpu::tensor_like<double>>(hidden);
@@ -293,11 +324,14 @@ void learning_env::run()
         graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride);
         graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
 
+        auto& m = hidden_t.as_matrix();
+        auto h_mat = autodiff::weak_var(hidden, 0, std::vector<unsigned int> { m.rows(), m.cols() });
+
         if (ebt::in(std::string("dropout"), args)) {
-            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], hidden,
+            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], h_mat,
                 dropout, &gen);
         } else {
-            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], hidden);
+            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], h_mat);
         }
 
         seg::loss_func *loss_func;
@@ -326,8 +360,13 @@ void learning_env::run()
         std::cout << "loss: " << ell << std::endl;
         std::cout << "E: " << ell / label_seq.size() << std::endl;
 
-        std::shared_ptr<tensor_tree::vertex> param_grad
-            = make_tensor_tree(features, layer);
+        std::shared_ptr<tensor_tree::vertex> param_grad;
+
+        if (ebt::in(std::string("dyer-lstm"), args)) {
+            param_grad = make_dyer_tensor_tree(features, layer);
+        } else {
+            param_grad = make_tensor_tree(features, layer);
+        }
 
         if (ell > 0) {
             loss_func->grad();
