@@ -132,7 +132,11 @@ void prediction_env::run()
         std::shared_ptr<lstm::transcriber> trans;
 
         if (ebt::in(std::string("subsampling"), args)) {
-            trans = lstm_frame::make_pyramid_transcriber(layer, 0.0, nullptr);
+            if (ebt::in(std::string("dyer-lstm"), args)) {
+                trans = lstm_frame::make_dyer_pyramid_transcriber(layer, 0.0, nullptr);
+            } else {
+                trans = lstm_frame::make_pyramid_transcriber(layer, 0.0, nullptr);
+            }
         } else {
             if (ebt::in(std::string("dyer-lstm"), args)) {
                 trans = lstm_frame::make_dyer_transcriber(layer, 0.0, nullptr);
