@@ -41,8 +41,6 @@ struct prediction_env {
     int layer;
     std::shared_ptr<tensor_tree::vertex> param;
 
-    int cell_dim;
-
     std::vector<std::string> id_label;
     std::unordered_map<std::string, int> label_id;
 
@@ -111,14 +109,6 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
 
-    if (ebt::in(std::string("dyer-lstm"), args)) {
-        cell_dim = tensor_tree::get_tensor(param->children[1]->children[0]
-            ->children[0]->children[0]->children[0]).size(1) / 3;
-    } else {
-        cell_dim = tensor_tree::get_tensor(param->children[1]->children[0]
-            ->children[0]->children[0]->children[0]).size(1) / 4;
-    }
-
     max_seg = 20;
     if (ebt::in(std::string("max-seg"), args)) {
         max_seg = std::stoi(args.at("max-seg"));
@@ -176,30 +166,36 @@ void prediction_env::run()
 
         if (ebt::in(std::string("subsampling"), args)) {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_pyramid_transcriber(layer, 0.0, nullptr);
+                trans = lstm_frame::make_dyer_transcriber(param->children[1], 0.0, nullptr, true);
             } else {
-                trans = lstm_frame::make_pyramid_transcriber(layer, 0.0, nullptr);
+                trans = lstm_frame::make_transcriber(param->children[1], 0.0, nullptr, true);
             }
         } else {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(layer, 0.0, nullptr);
+                trans = lstm_frame::make_dyer_transcriber(param->children[1], 0.0, nullptr, false);
             } else {
-                trans = lstm_frame::make_transcriber(layer, 0.0, nullptr);
+                trans = lstm_frame::make_transcriber(param->children[1], 0.0, nullptr, false);
             }
         }
 
-        std::shared_ptr<autodiff::op_t> hidden;
-        std::shared_ptr<autodiff::op_t> ignore;
+        lstm::trans_seq_t input_seq;
+        input_seq.nframes = frames.size();
+        input_seq.batch_size = 1;
+        input_seq.dim = frames.front().size();
+        input_seq.feat = input;
+        input_seq.mask = nullptr;
+
+        lstm::trans_seq_t output_seq;
 
         if (ebt::in(std::string("logsoftmax"), args)) {
             trans = std::make_shared<lstm::logsoftmax_transcriber>(
-                lstm::logsoftmax_transcriber { trans });
-            std::tie(hidden, ignore) = (*trans)(frames.size(), 1, cell_dim,
-                var_tree->children[1], input);
+                lstm::logsoftmax_transcriber { (int) label_id.size(), trans });
+            output_seq = (*trans)(var_tree->children[1], input_seq);
         } else {
-            std::tie(hidden, ignore) = (*trans)(frames.size(), 1, cell_dim,
-                var_tree->children[1]->children[0], input);
+            output_seq = (*trans)(var_tree->children[1]->children[0], input_seq);
         }
+
+        std::shared_ptr<autodiff::op_t> hidden = output_seq.feat;
 
         auto& hidden_t = autodiff::get_output<la::cpu::tensor_like<double>>(hidden);
 

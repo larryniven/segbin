@@ -49,8 +49,6 @@ struct learning_env {
     int layer;
     std::shared_ptr<tensor_tree::vertex> param;
 
-    int cell_dim;
-
     double dropout;
     double clip;
     double step_size;
@@ -145,14 +143,6 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
 
-    if (ebt::in(std::string("dyer-lstm"), args)) {
-        cell_dim = tensor_tree::get_tensor(param->children[1]->children[0]
-            ->children[0]->children[0]->children[0]).size(1) / 3;
-    } else {
-        cell_dim = tensor_tree::get_tensor(param->children[1]->children[0]
-            ->children[0]->children[0]->children[0]).size(1) / 4;
-    }
-
     output_param = "param-last";
     if (ebt::in(std::string("output-param"), args)) {
         output_param = args.at("output-param");
@@ -245,8 +235,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         opt = std::make_shared<tensor_tree::adam_opt>(
             tensor_tree::adam_opt{param, step_size, beta1, beta2});
     } else {
-        std::cout << "unknown optimizer " << args.at("opt") << std::endl;
-        exit(1);
+        throw std::logic_error("unknown optimizer " + args.at("opt"));
     }
 
     std::ifstream opt_data_ifs { args.at("opt-data") };
@@ -292,28 +281,36 @@ void learning_env::run()
         std::shared_ptr<lstm::transcriber> trans;
         if (ebt::in(std::string("subsampling"), args)) {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_pyramid_transcriber(layer, dropout, &gen);
+                trans = lstm_frame::make_dyer_transcriber(param->children[1], dropout, &gen, true);
             } else {
-                trans = lstm_frame::make_pyramid_transcriber(layer, dropout, &gen);
+                trans = lstm_frame::make_transcriber(param->children[1], dropout, &gen, true);
             }
         } else {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(layer, dropout, &gen);
+                trans = lstm_frame::make_dyer_transcriber(param->children[1], dropout, &gen, false);
             } else {
-                trans = lstm_frame::make_transcriber(layer, dropout, &gen);
+                trans = lstm_frame::make_transcriber(param->children[1], dropout, &gen, false);
             }
         }
 
-        std::shared_ptr<autodiff::op_t> hidden;
-        std::shared_ptr<autodiff::op_t> ignore;
+        lstm::trans_seq_t input_seq;
+        input_seq.nframes = frames.size();
+        input_seq.batch_size = 1;
+        input_seq.dim = frames.front().size();
+        input_seq.feat = input;
+        input_seq.mask = nullptr;
+
+        lstm::trans_seq_t output_seq;
 
         if (ebt::in(std::string("logsoftmax"), args)) {
             trans = std::make_shared<lstm::logsoftmax_transcriber>(
-                lstm::logsoftmax_transcriber { trans });
-            std::tie(hidden, ignore) = (*trans)(frames.size(), 1, cell_dim, var_tree->children[1], input);
+                lstm::logsoftmax_transcriber { (int) label_id.size(), trans });
+            output_seq = (*trans)(var_tree->children[1], input_seq);
         } else {
-            std::tie(hidden, ignore) = (*trans)(frames.size(), 1, cell_dim, var_tree->children[1]->children[0], input);
+            output_seq = (*trans)(var_tree->children[1]->children[0], input_seq);
         }
+
+        std::shared_ptr<autodiff::op_t> hidden = output_seq.feat;
 
         auto& hidden_t = autodiff::get_output<la::cpu::tensor_like<double>>(hidden);
 
@@ -353,8 +350,7 @@ void learning_env::run()
             label_fst = std::make_shared<ifst::fst>(
                 seg::make_label_fst_1b(label_seq, label_id, id_label));
         } else {
-            std::cout << "unknown type " << args.at("type") << std::endl;
-            exit(1);
+            throw std::logic_error("unknown type " + args.at("type"));
         }
 
         loss_func = new seg::marginal_log_loss { graph_data, *label_fst };

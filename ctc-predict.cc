@@ -13,8 +13,6 @@ struct prediction_env {
     int layer;
     std::shared_ptr<tensor_tree::vertex> param;
 
-    int cell_dim;
-
     std::unordered_map<std::string, int> label_id;
     std::vector<std::string> id_label;
 
@@ -80,14 +78,6 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
 
-    if (ebt::in(std::string("dyer-lstm"), args)) {
-        cell_dim = tensor_tree::get_tensor(param->children[0]
-            ->children[0]->children[0]->children[0]).size(1) / 3;
-    } else {
-        cell_dim = tensor_tree::get_tensor(param->children[0]
-            ->children[0]->children[0]->children[0]).size(1) / 4;
-    }
-
     id_label = speech::load_label_set(args.at("label"));
     for (int i = 0; i < id_label.size(); ++i) {
         label_id[id_label[i]] = i;
@@ -133,24 +123,31 @@ void prediction_env::run()
 
         if (ebt::in(std::string("subsampling"), args)) {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_pyramid_transcriber(layer, 0.0, nullptr);
+                trans = lstm_frame::make_dyer_transcriber(param, 0.0, nullptr, true);
             } else {
-                trans = lstm_frame::make_pyramid_transcriber(layer, 0.0, nullptr);
+                trans = lstm_frame::make_transcriber(param, 0.0, nullptr, true);
             }
         } else {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(layer, 0.0, nullptr);
+                trans = lstm_frame::make_dyer_transcriber(param, 0.0, nullptr, false);
             } else {
-                trans = lstm_frame::make_transcriber(layer, 0.0, nullptr);
+                trans = lstm_frame::make_transcriber(param, 0.0, nullptr, false);
             }
         }
 
         trans = std::make_shared<lstm::logsoftmax_transcriber>(
-            lstm::logsoftmax_transcriber { trans });
+            lstm::logsoftmax_transcriber { (int) label_id.size(), trans });
 
-        std::shared_ptr<autodiff::op_t> logprob;
-        std::shared_ptr<autodiff::op_t> ignore;
-        std::tie(logprob, ignore) = (*trans)(frames.size(), 1, cell_dim, lstm_var_tree, input);
+        lstm::trans_seq_t input_seq;
+        input_seq.nframes = frames.size();
+        input_seq.batch_size = 1;
+        input_seq.dim = frames.front().size();
+        input_seq.feat = input;
+        input_seq.mask = nullptr;
+
+        lstm::trans_seq_t output_seq = (*trans)(lstm_var_tree, input_seq);
+
+        std::shared_ptr<autodiff::op_t> logprob = output_seq.feat;
 
         auto& logprob_t = autodiff::get_output<la::cpu::tensor_like<double>>(logprob);
 

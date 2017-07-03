@@ -3,24 +3,25 @@ CXXFLAGS += -std=c++14 -I .. -L ../speech -L ../nn -L ../autodiff -L ../opt -L .
 bin = \
     oracle-error \
     ctc-learn \
-    ctc-loss \
     ctc-predict \
     segrnn-learn \
-    segrnn-loss \
-    segrnn-predict \
-    segrnn-prune \
-    segrnn-beam-prune \
-    segrnn-align \
-    segrnn-frame-learn \
-    segrnn-ctc-learn \
-    segrnn-sup-learn \
-    segrnn-sup-loss \
-    seglin-learn \
-    seglin-sup-learn \
-    seglin-predict \
-    segrnn-forward-learn \
-    segrnn-seg-learn \
-    segrnn-seg-predict \
+    segrnn-predict
+
+    # segrnn-loss \
+    # ctc-loss \
+    # segrnn-prune \
+    # segrnn-beam-prune \
+    # segrnn-align \
+    # segrnn-frame-learn \
+    # segrnn-ctc-learn \
+    # segrnn-sup-learn \
+    # segrnn-sup-loss \
+    # seglin-learn \
+    # seglin-sup-learn \
+    # seglin-predict \
+    # segrnn-forward-learn \
+    # segrnn-seg-learn \
+    # segrnn-seg-predict \
 
     # segrnn-cascade-learn \
     # segrnn-cascade-predict \

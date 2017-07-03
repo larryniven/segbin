@@ -21,8 +21,6 @@ struct learning_env {
     std::shared_ptr<tensor_tree::vertex> param;
     std::shared_ptr<tensor_tree::vertex> opt_data;
 
-    int cell_dim;
-
     double step_size;
     double dropout;
     double clip;
@@ -111,14 +109,6 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     }
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
-
-    if (ebt::in(std::string("dyer-lstm"), args)) {
-        cell_dim = tensor_tree::get_tensor(param->children[0]
-            ->children[0]->children[0]->children[0]).size(1) / 3;
-    } else {
-        cell_dim = tensor_tree::get_tensor(param->children[0]
-            ->children[0]->children[0]->children[0]).size(1) / 4;
-    }
 
     step_size = std::stod(args.at("step-size"));
 
@@ -242,24 +232,31 @@ void learning_env::run()
 
         if (ebt::in(std::string("subsampling"), args)) {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_pyramid_transcriber(layer, dropout, &gen);
+                trans = lstm_frame::make_dyer_transcriber(param, dropout, &gen, true);
             } else {
-                trans = lstm_frame::make_pyramid_transcriber(layer, dropout, &gen);
+                trans = lstm_frame::make_transcriber(param, dropout, &gen, true);
             }
         } else {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(layer, dropout, &gen);
+                trans = lstm_frame::make_dyer_transcriber(param, dropout, &gen, false);
             } else {
-                trans = lstm_frame::make_transcriber(layer, dropout, &gen);
+                trans = lstm_frame::make_transcriber(param, dropout, &gen, false);
             }
         }
 
         trans = std::make_shared<lstm::logsoftmax_transcriber>(
-            lstm::logsoftmax_transcriber { trans });
+            lstm::logsoftmax_transcriber { (int) label_id.size(), trans });
 
-        std::shared_ptr<autodiff::op_t> logprob;
-        std::shared_ptr<autodiff::op_t> ignore;
-        std::tie(logprob, ignore) = (*trans)(frames.size(), 1, cell_dim, lstm_var_tree, input);
+        lstm::trans_seq_t input_seq;
+        input_seq.nframes = frames.size();
+        input_seq.batch_size = 1;
+        input_seq.dim = frames.front().size();
+        input_seq.feat = input;
+        input_seq.mask = nullptr;
+
+        lstm::trans_seq_t output_seq = (*trans)(lstm_var_tree, input_seq);
+
+        std::shared_ptr<autodiff::op_t> logprob = output_seq.feat;
 
         auto& logprob_t = autodiff::get_output<la::cpu::tensor_like<double>>(logprob);
 
