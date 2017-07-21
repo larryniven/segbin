@@ -46,7 +46,7 @@ struct learning_env {
 int main(int argc, char *argv[])
 {
     ebt::ArgumentSpec spec {
-        "seglin-learn",
+        "seglin-sup-learn",
         "Learn a linear segmental model",
         {
             {"frame-batch", "", true},

@@ -66,6 +66,7 @@ int main(int argc, char *argv[])
             {"features", "", true},
             {"subsampling", "", false},
             {"logsoftmax", "", false},
+            {"dyer-lstm", "", false},
             {"label", "", true},
             {"print-path", "", false},
         }

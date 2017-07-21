@@ -5,7 +5,11 @@ bin = \
     ctc-learn \
     ctc-predict \
     segrnn-learn \
-    segrnn-predict
+    segrnn-predict \
+    seglin-learn \
+    seglin-sup-learn \
+    seglin-predict \
+    seglin-beam-prune
 
     # segrnn-loss \
     # ctc-loss \
@@ -16,9 +20,7 @@ bin = \
     # segrnn-ctc-learn \
     # segrnn-sup-learn \
     # segrnn-sup-loss \
-    # seglin-learn \
     # seglin-sup-learn \
-    # seglin-predict \
     # segrnn-forward-learn \
     # segrnn-seg-learn \
     # segrnn-seg-predict \
@@ -49,6 +51,9 @@ clean:
 	-rm $(bin)
 
 oracle-error: oracle-error.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+oracle-random: oracle-random.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 oracle-cost: oracle-cost.o
@@ -151,6 +156,9 @@ seglin-sup-learn: seglin-sup-learn.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 seglin-predict: seglin-predict.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
+
+seglin-beam-prune: seglin-beam-prune.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lseg -lfst -lspeech -lnn -lautodiff -lopt -lla -lebt -lblas
 
 segrnn-seg-learn: segrnn-seg-learn.o

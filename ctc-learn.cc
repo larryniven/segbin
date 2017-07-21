@@ -61,6 +61,7 @@ int main(int argc, char *argv[])
             {"subsampling", "", false},
             {"shuffle", "", false},
             {"dyer-lstm", "", false},
+            {"type", "ctc,ctc-1b,hmm1s,hmm2s", true},
             {"opt", "const-step,rmsprop,adagrad,adam", true},
             {"step-size", "", true},
             {"clip", "", false},
@@ -68,7 +69,6 @@ int main(int argc, char *argv[])
             {"momentum", "", false},
             {"beta1", "", false},
             {"beta2", "", false},
-            {"type", "ctc,ctc-1b,hmm1s,hmm2s", true},
             {"random-state", "", false}
         }
     };

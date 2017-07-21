@@ -53,18 +53,18 @@ int main(int argc, char *argv[])
             {"stride", "", false},
             {"param", "", true},
             {"opt-data", "", true},
-            {"step-size", "", true},
-            {"decay", "", false},
-            {"momentum", "", false},
-            {"features", "", true},
             {"output-param", "", false},
             {"output-opt-data", "", false},
+            {"features", "", true},
             {"label", "", true},
-            {"clip", "", false},
             {"dropout", "", false},
             {"seed", "", false},
             {"shuffle", "", false},
             {"opt", "const-step,rmsprop,adagrad", true}
+            {"step-size", "", true},
+            {"clip", "", false},
+            {"decay", "", false},
+            {"momentum", "", false},
         }
     };
 

@@ -92,7 +92,7 @@ int main(int argc, char *argv[])
             {"rep-labels", "", false},
             {"logsoftmax", "", false},
             {"subsampling", "", false},
-            {"type", "std,std-1b", false},
+            {"type", "std,std-1b", true},
             {"nsample", "", false},
             {"opt", "const-step,const-step-momentum,rmsprop,adagrad,adam", true},
             {"step-size", "", true},
