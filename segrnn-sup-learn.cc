@@ -223,8 +223,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         opt = std::make_shared<tensor_tree::adam_opt>(
             tensor_tree::adam_opt{param, step_size, beta1, beta2});
     } else {
-        std::cout << "unknown optimizer " << args.at("opt") << std::endl;
-        exit(1);
+        throw std::logic_error("unknown optimizer " + args.at("opt"));
     }
 
     std::ifstream opt_data_ifs { args.at("opt-data") };
@@ -252,46 +251,68 @@ void learning_env::run()
         std::shared_ptr<tensor_tree::vertex> var_tree
             = tensor_tree::make_var_tree(comp_graph, param);
 
-        std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
+        std::vector<double> frame_cat;
+        frame_cat.reserve(frames.size() * frames.front().size());
+
         for (int i = 0; i < frames.size(); ++i) {
-            auto f_var = comp_graph.var(la::tensor<double>(
-                la::vector<double>(frames[i])));
-            frame_ops.push_back(f_var);
+            frame_cat.insert(frame_cat.end(), frames[i].begin(), frames[i].end());
         }
+
+        unsigned int nframes = frames.size();
+        unsigned int ndim = frames.front().size();
+
+        std::shared_ptr<autodiff::op_t> input
+            = comp_graph.var(la::cpu::weak_tensor<double>(
+                frame_cat.data(), { nframes, ndim }));
+
+        input->grad_needed = false;
 
         std::shared_ptr<lstm::transcriber> trans;
         if (ebt::in(std::string("subsampling"), args)) {
-            trans = lstm_frame::make_pyramid_transcriber(layer, dropout, &gen);
+            trans = lstm_frame::make_transcriber(param->children[1], dropout, &gen, true);
         } else {
-            trans = lstm_frame::make_transcriber(layer, dropout, &gen);
+            trans = lstm_frame::make_transcriber(param->children[1], dropout, &gen, false);
         }
+
+        lstm::trans_seq_t input_seq;
+        input_seq.nframes = frames.size();
+        input_seq.batch_size = 1;
+        input_seq.dim = frames.front().size();
+        input_seq.feat = input;
+        input_seq.mask = nullptr;
+
+        lstm::trans_seq_t output_seq;
 
         if (ebt::in(std::string("logsoftmax"), args)) {
             trans = std::make_shared<lstm::logsoftmax_transcriber>(
-                lstm::logsoftmax_transcriber { trans });
-            frame_ops = (*trans)(var_tree->children[1], frame_ops);
+                lstm::logsoftmax_transcriber { (int) label_id.size(), trans });
+            output_seq = (*trans)(var_tree->children[1], input_seq);
         } else {
-            frame_ops = (*trans)(var_tree->children[1]->children[0], frame_ops);
+            output_seq = (*trans)(var_tree->children[1]->children[0], input_seq);
         }
 
-        std::cout << "frames: " << frames.size() << " downsampled: " << frame_ops.size() << std::endl;
+        std::shared_ptr<autodiff::op_t> hidden = output_seq.feat;
+        auto& hidden_t = autodiff::get_output<la::cpu::tensor_like<double>>(hidden);
 
-        if (frame_ops.size() < segs.size()) {
+        std::cout << "frames: " << frames.size() << " downsampled: " << hidden_t.size(0) << std::endl;
+
+        if (hidden_t.size(0) < segs.size()) {
             ++nsample;
             continue;
         }
 
         seg::iseg_data graph_data;
-        graph_data.fst = seg::make_graph(frame_ops.size(), label_id, id_label, min_seg, max_seg, stride);
+        graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride);
         graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
 
-        auto frame_mat = autodiff::row_cat(frame_ops);
+        auto& m = hidden_t.as_matrix();
+        auto h_mat = autodiff::weak_var(hidden, 0, std::vector<unsigned int> { m.rows(), m.cols() });
 
         if (ebt::in(std::string("dropout"), args)) {
-            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], frame_mat,
+            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], h_mat,
                 dropout, &gen);
         } else {
-            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], frame_mat);
+            graph_data.weight_func = seg::make_weights(features, var_tree->children[0], h_mat);
         }
 
         seg::loss_func *loss_func;
@@ -307,8 +328,7 @@ void learning_env::run()
         } else if (args.at("loss") == "hinge-loss") {
             loss_func = new seg::hinge_loss { graph_data, gt_segs, sils };
         } else {
-            std::cout << "unknown loss function " << args.at("loss") << std::endl;
-            exit(1);
+            throw std::logic_error("unknown loss function " + args.at("loss"));
         }
 
         double ell = loss_func->loss();
@@ -326,7 +346,7 @@ void learning_env::run()
 
             std::vector<std::shared_ptr<autodiff::op_t>> topo_order;
 
-            for (int i = frame_mat->id; i >= 0; --i) {
+            for (int i = hidden->id; i >= 0; --i) {
                 topo_order.push_back(comp_graph.vertices.at(i));
             }
 

@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
             {"dropout", "", false},
             {"seed", "", false},
             {"shuffle", "", false},
-            {"opt", "const-step,rmsprop,adagrad", true}
+            {"opt", "const-step,rmsprop,adagrad", true},
             {"step-size", "", true},
             {"clip", "", false},
             {"decay", "", false},

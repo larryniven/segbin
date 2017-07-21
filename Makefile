@@ -5,6 +5,7 @@ bin = \
     ctc-learn \
     ctc-predict \
     segrnn-learn \
+    segrnn-sup-learn \
     segrnn-predict \
     seglin-learn \
     seglin-sup-learn \
@@ -18,7 +19,6 @@ bin = \
     # segrnn-align \
     # segrnn-frame-learn \
     # segrnn-ctc-learn \
-    # segrnn-sup-learn \
     # segrnn-sup-loss \
     # seglin-sup-learn \
     # segrnn-forward-learn \
