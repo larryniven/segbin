@@ -94,6 +94,7 @@ int main(int argc, char *argv[])
             {"subsampling", "", false},
             {"type", "std,std-1b", true},
             {"nsample", "", false},
+            {"drop-edges", "", false},
             {"opt", "const-step,const-step-momentum,rmsprop,adagrad,adam", true},
             {"step-size", "", true},
             {"clip", "", false},
@@ -322,7 +323,11 @@ void learning_env::run()
         }
 
         seg::iseg_data graph_data;
-        graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride);
+        if (ebt::in(std::string("drop-edges"), args)) {
+            graph_data.fst = seg::make_random_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride, 1.0 - std::stod(args.at("drop-edges")), gen);
+        } else {
+            graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride);
+        }
         graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
 
         auto& m = hidden_t.as_matrix();

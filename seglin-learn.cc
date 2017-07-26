@@ -60,6 +60,8 @@ int main(int argc, char *argv[])
             {"dropout", "", false},
             {"seed", "", false},
             {"shuffle", "", false},
+            {"nsample", "", false},
+            {"drop-edges", "", false},
             {"opt", "const-step,rmsprop,adagrad", true},
             {"step-size", "", true},
             {"clip", "", false},
@@ -239,7 +241,11 @@ void learning_env::run()
         }
 
         seg::iseg_data graph_data;
-        graph_data.fst = seg::make_graph(frames.size(), label_id, id_label, min_seg, max_seg, stride);
+        if (ebt::in(std::string("drop-edges"), args)) {
+            graph_data.fst = seg::make_random_graph(frames.size(), label_id, id_label, min_seg, max_seg, stride, 1.0 - std::stod(args.at("drop-edges")), gen);
+        } else {
+            graph_data.fst = seg::make_graph(frames.size(), label_id, id_label, min_seg, max_seg, stride);
+        }
         graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
 
         if (ebt::in(std::string("dropout"), args)) {
@@ -318,11 +324,9 @@ void learning_env::run()
 
         delete loss_func;
 
-#if DEBUG_TOP
-        if (nsample == DEBUG_TOP) {
+        if (ebt::in(std::string("nsample"), args) && nsample == std::stoi(args.at("nsample"))) {
             break;
         }
-#endif
 
     }
 
