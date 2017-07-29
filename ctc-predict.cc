@@ -249,6 +249,27 @@ void prediction_env::run()
                 }
             }
             std::cout << "(" << nsample << ".dot)" << std::endl;
+        } else if (args.at("type") == "hmm2s" && ebt::in(std::string("rmdup"), args)) {
+            fst::forward_one_best<seg::seg_fst<seg::iseg_data>> one_best;
+
+            for (auto& i: graph.initials()) {
+                one_best.extra[i] = {-1, 0};
+            }
+
+            auto topo_order = fst::topo_order(graph);
+
+            one_best.merge(graph, topo_order);
+
+            std::vector<int> path = one_best.best_path(graph);
+
+            for (int i = 0; i < path.size(); ++i) {
+                auto& o_i = graph.output(path[i]);
+
+                if (!ebt::endswith(id_label.at(o_i), "-")) {
+                    std::cout << id_label.at(o_i) << " ";
+                }
+            }
+            std::cout << "(" << nsample << ".dot)" << std::endl;
         } else {
             fst::forward_one_best<seg::seg_fst<seg::iseg_data>> one_best;
 
