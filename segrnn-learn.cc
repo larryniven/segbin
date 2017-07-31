@@ -282,15 +282,15 @@ void learning_env::run()
         std::shared_ptr<lstm::transcriber> trans;
         if (ebt::in(std::string("subsampling"), args)) {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param->children[1], dropout, &gen, true);
+                trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], dropout, &gen, true);
             } else {
-                trans = lstm_frame::make_transcriber(param->children[1], dropout, &gen, true);
+                trans = lstm_frame::make_transcriber(param->children[1]->children[0], dropout, &gen, true);
             }
         } else {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param->children[1], dropout, &gen, false);
+                trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], dropout, &gen, false);
             } else {
-                trans = lstm_frame::make_transcriber(param->children[1], dropout, &gen, false);
+                trans = lstm_frame::make_transcriber(param->children[1]->children[0], dropout, &gen, false);
             }
         }
 

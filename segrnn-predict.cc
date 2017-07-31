@@ -167,15 +167,15 @@ void prediction_env::run()
 
         if (ebt::in(std::string("subsampling"), args)) {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param->children[1], 0.0, nullptr, true);
+                trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], 0.0, nullptr, true);
             } else {
-                trans = lstm_frame::make_transcriber(param->children[1], 0.0, nullptr, true);
+                trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, true);
             }
         } else {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param->children[1], 0.0, nullptr, false);
+                trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], 0.0, nullptr, false);
             } else {
-                trans = lstm_frame::make_transcriber(param->children[1], 0.0, nullptr, false);
+                trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, false);
             }
         }
 
