@@ -281,14 +281,14 @@ void learning_env::run()
         input_seq.feat = input;
         input_seq.mask = nullptr;
 
-        lstm::trans_seq_t output_seq;
+        lstm::trans_seq_t output_seq = (*trans)(var_tree->children[1]->children[0], input_seq);
 
         if (ebt::in(std::string("logsoftmax"), args)) {
-            trans = std::make_shared<lstm::logsoftmax_transcriber>(
-                lstm::logsoftmax_transcriber { (int) label_id.size(), trans });
-            output_seq = (*trans)(var_tree->children[1], input_seq);
-        } else {
-            output_seq = (*trans)(var_tree->children[1]->children[0], input_seq);
+            lstm::fc_transcriber fc_trans { (int) label_id.size() };
+            lstm::logsoftmax_transcriber logsoftmax_trans;
+            auto score = fc_trans(var_tree->children[1]->children[1], output_seq);
+
+            output_seq = logsoftmax_trans(nullptr, score);
         }
 
         std::shared_ptr<autodiff::op_t> hidden = output_seq.feat;

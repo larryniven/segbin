@@ -135,9 +135,6 @@ void prediction_env::run()
             }
         }
 
-        trans = std::make_shared<lstm::logsoftmax_transcriber>(
-            lstm::logsoftmax_transcriber { (int) label_id.size(), trans });
-
         lstm::trans_seq_t input_seq;
         input_seq.nframes = frames.size();
         input_seq.batch_size = 1;
@@ -145,7 +142,11 @@ void prediction_env::run()
         input_seq.feat = input;
         input_seq.mask = nullptr;
 
-        lstm::trans_seq_t output_seq = (*trans)(lstm_var_tree, input_seq);
+        lstm::trans_seq_t feat_seq = (*trans)(lstm_var_tree, input_seq);
+        lstm::fc_transcriber fc_trans { (int) label_id.size() };
+        lstm::logsoftmax_transcriber logsoftmax_trans;
+        auto score_seq = fc_trans(var_tree->children[1], feat_seq);
+        auto output_seq = logsoftmax_trans(nullptr, score_seq);
 
         std::shared_ptr<autodiff::op_t> logprob = output_seq.feat;
 
