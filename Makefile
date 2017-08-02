@@ -7,6 +7,7 @@ bin = \
     segrnn-learn \
     segrnn-sup-learn \
     segrnn-predict \
+    segrnn-align \
     seglin-learn \
     seglin-sup-learn \
     seglin-predict \
@@ -16,7 +17,6 @@ bin = \
     # ctc-loss \
     # segrnn-prune \
     # segrnn-beam-prune \
-    # segrnn-align \
     # segrnn-frame-learn \
     # segrnn-ctc-learn \
     # segrnn-sup-loss \

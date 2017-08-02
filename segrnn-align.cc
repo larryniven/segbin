@@ -3,17 +3,51 @@
 #include "fst/fst-algo.h"
 #include "seg/seg.h"
 #include <fstream>
+#include "nn/lstm-frame.h"
+
+std::shared_ptr<tensor_tree::vertex> make_dyer_tensor_tree(
+    std::vector<std::string> const& features,
+    int layer)
+{
+    tensor_tree::vertex root;
+
+    root.children.push_back(seg::make_tensor_tree(features));
+    root.children.push_back(lstm_frame::make_dyer_tensor_tree(layer));
+
+    return std::make_shared<tensor_tree::vertex>(root);
+}
+
+std::shared_ptr<tensor_tree::vertex> make_tensor_tree(
+    std::vector<std::string> const& features,
+    int layer)
+{
+    tensor_tree::vertex root;
+
+    root.children.push_back(seg::make_tensor_tree(features));
+    root.children.push_back(lstm_frame::make_tensor_tree(layer));
+
+    return std::make_shared<tensor_tree::vertex>(root);
+}
 
 struct alignment_env {
+
+    std::vector<std::string> features;
 
     std::ifstream frame_batch;
     std::ifstream label_batch;
 
-    int inner_layer;
-    int outer_layer;
-    std::shared_ptr<tensor_tree::vertex> nn_param;
+    int max_seg;
+    int min_seg;
+    int stride;
 
-    seg::inference_args l_args;
+    int layer;
+    std::shared_ptr<tensor_tree::vertex> param;
+
+    int seed;
+    std::default_random_engine gen;
+
+    std::vector<std::string> id_label;
+    std::unordered_map<std::string, int> label_id;
 
     std::unordered_map<std::string, std::string> args;
 
@@ -35,7 +69,6 @@ int main(int argc, char *argv[])
             {"max-seg", "", false},
             {"stride", "", false},
             {"param", "", true},
-            {"nn-param", "", false},
             {"features", "", true},
             {"label", "", true},
             {"frames", "", false},
@@ -67,18 +100,49 @@ int main(int argc, char *argv[])
 alignment_env::alignment_env(std::unordered_map<std::string, std::string> args)
     : args(args)
 {
-    if (ebt::in(std::string("frame-batch"), args)) {
-        frame_batch.open(args.at("frame-batch"));
-    }
+    features = ebt::split(args.at("features"), ",");
 
+    frame_batch.open(args.at("frame-batch"));
     label_batch.open(args.at("label-batch"));
 
-    if (ebt::in(std::string("nn-param"), args)) {
-        std::tie(outer_layer, inner_layer, nn_param)
-            = seg::load_lstm_param(args.at("nn-param"));
+    std::ifstream param_ifs { args.at("param") };
+    std::string line;
+    std::getline(param_ifs, line);
+    layer = std::stoi(line);
+    if (ebt::in(std::string("dyer-lstm"), args)) {
+        param = make_dyer_tensor_tree(features, layer);
+    } else {
+        param = make_tensor_tree(features, layer);
+    }
+    tensor_tree::load_tensor(param, param_ifs);
+    param_ifs.close();
+
+    max_seg = 20;
+    if (ebt::in(std::string("max-seg"), args)) {
+        max_seg = std::stoi(args.at("max-seg"));
     }
 
-    seg::parse_inference_args(l_args, args);
+    min_seg = 1;
+    if (ebt::in(std::string("min-seg"), args)) {
+        min_seg = std::stoi(args.at("min-seg"));
+    }
+
+    stride = 1;
+    if (ebt::in(std::string("stride"), args)) {
+        stride = std::stoi(args.at("stride"));
+    }
+
+    seed = 1;
+    if (ebt::in(std::string("seed"), args)) {
+        seed = std::stoi(args.at("seed"));
+    }
+
+    gen = std::default_random_engine{seed};
+
+    id_label = speech::load_label_set(args.at("label"));
+    for (int i = 0; i < id_label.size(); ++i) {
+        label_id[id_label[i]] = i;
+    }
 }
 
 void alignment_env::run()
@@ -87,61 +151,91 @@ void alignment_env::run()
 
     while (1) {
 
-        seg::sample s { l_args };
+        std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_batch);
+        std::vector<int> label_seq = speech::load_label_seq_batch(label_batch, label_id);
 
-        s.frames = speech::load_frame_batch(frame_batch);
-        std::vector<std::string> label_seq = speech::load_label_seq(label_batch);
-
-        if (!label_batch) {
+        if (!frame_batch || !label_batch) {
             break;
         }
 
         autodiff::computation_graph comp_graph;
+
         std::shared_ptr<tensor_tree::vertex> var_tree
-            = tensor_tree::make_var_tree(comp_graph, l_args.param);
+            = tensor_tree::make_var_tree(comp_graph, param);
 
-        std::shared_ptr<tensor_tree::vertex> lstm_var_tree
-            = tensor_tree::make_var_tree(comp_graph, nn_param);
+        std::vector<double> frame_cat;
+        frame_cat.reserve(frames.size() * frames.front().size());
 
-        std::vector<std::shared_ptr<autodiff::op_t>> frame_ops;
-        for (int i = 0; i < s.frames.size(); ++i) {
-            frame_ops.push_back(comp_graph.var(la::tensor<double>(la::vector<double>(s.frames[i]))));
+        for (int i = 0; i < frames.size(); ++i) {
+            frame_cat.insert(frame_cat.end(), frames[i].begin(), frames[i].end());
         }
 
-        if (ebt::in(std::string("nn-param"), args)) {
-            std::shared_ptr<lstm::transcriber> trans
-                = seg::make_transcriber(outer_layer, inner_layer, args, nullptr);
+        unsigned int nframes = frames.size();
+        unsigned int ndim = frames.front().size();
 
-            if (ebt::in(std::string("logsoftmax"), args)) {
-                trans = std::make_shared<lstm::logsoftmax_transcriber>(
-                    lstm::logsoftmax_transcriber { trans });
-                frame_ops = (*trans)(lstm_var_tree, frame_ops);
+        std::shared_ptr<autodiff::op_t> input
+            = comp_graph.var(la::cpu::weak_tensor<double>(
+                frame_cat.data(), { nframes, ndim }));
+
+        input->grad_needed = false;
+
+        std::shared_ptr<lstm::transcriber> trans;
+
+        if (ebt::in(std::string("subsampling"), args)) {
+            if (ebt::in(std::string("dyer-lstm"), args)) {
+                trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], 0.0, nullptr, true);
             } else {
-                frame_ops = (*trans)(lstm_var_tree->children[0], frame_ops);
+                trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, true);
+            }
+        } else {
+            if (ebt::in(std::string("dyer-lstm"), args)) {
+                trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], 0.0, nullptr, false);
+            } else {
+                trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, false);
             }
         }
 
-        seg::make_graph(s, l_args, frame_ops.size());
+        lstm::trans_seq_t input_seq;
+        input_seq.nframes = frames.size();
+        input_seq.batch_size = 1;
+        input_seq.dim = frames.front().size();
+        input_seq.feat = input;
+        input_seq.mask = nullptr;
 
-        auto frame_mat = autodiff::row_cat(frame_ops);
+        lstm::trans_seq_t output_seq = (*trans)(var_tree->children[1]->children[0], input_seq);
 
-        s.graph_data.weight_func = seg::make_weights(l_args.features, var_tree, frame_mat);
+        if (ebt::in(std::string("logsoftmax"), args)) {
+            lstm::fc_transcriber fc_trans { (int) label_id.size() };
+            lstm::logsoftmax_transcriber logsoftmax_trans;
+            auto score = fc_trans(var_tree->children[1]->children[1], output_seq);
 
-        std::vector<int> label_seq_id;
-        for (auto& s: label_seq) {
-            label_seq_id.push_back(l_args.label_id.at(s));
+            output_seq = logsoftmax_trans(nullptr, score);
         }
 
-        ifst::fst label_fst = seg::make_label_fst(label_seq_id, l_args.label_id, l_args.id_label);
+        std::shared_ptr<autodiff::op_t> hidden = output_seq.feat;
 
-        ifst::fst& graph_fst = *s.graph_data.fst;
+        auto& hidden_t = autodiff::get_output<la::cpu::tensor_like<double>>(hidden);
 
-        fst::lazy_pair_mode1_fst<ifst::fst, ifst::fst> composed_fst { label_fst, graph_fst };
+        auto& hidden_mat = hidden_t.as_matrix();
+        auto hidden_m = autodiff::weak_var(hidden, 0,
+            std::vector<unsigned int> { hidden_mat.rows(), hidden_mat.cols() });
+
+        seg::iseg_data graph_data;
+        graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride);
+        graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
+
+        graph_data.weight_func = seg::make_weights(features, var_tree->children[0], hidden_m);
+
+        ifst::fst label_fst = seg::make_label_fst(label_seq, label_id, id_label);
+
+        ifst::fst& graph_fst = *graph_data.fst;
+
+        fst::lazy_pair_mode2_fst<ifst::fst, ifst::fst> composed_fst { label_fst, graph_fst };
 
         seg::pair_iseg_data pair_data;
-        pair_data.fst = std::make_shared<fst::lazy_pair_mode1_fst<ifst::fst, ifst::fst>>(composed_fst);
+        pair_data.fst = std::make_shared<fst::lazy_pair_mode2_fst<ifst::fst, ifst::fst>>(composed_fst);
         pair_data.weight_func = std::make_shared<seg::mode2_weight>(
-            seg::mode2_weight { s.graph_data.weight_func });
+            seg::mode2_weight { graph_data.weight_func });
         pair_data.topo_order = std::make_shared<std::vector<std::tuple<int, int>>>(
             fst::topo_order(composed_fst));
 
@@ -156,7 +250,7 @@ void alignment_env::run()
 
         std::vector<std::tuple<int, int>> edges = one_best.best_path(pair);
 
-        seg::seg_fst<seg::iseg_data> graph { s.graph_data };
+        seg::seg_fst<seg::iseg_data> graph { graph_data };
 
         if (ebt::in(std::string("frames"), args)) {
             std::cout << nsample + 1 << ".phn" << std::endl;
@@ -164,7 +258,7 @@ void alignment_env::run()
             for (auto& e: edges) {
                 int head_time = graph.time(graph.head(std::get<1>(e)));
                 for (int j = t; j < head_time; ++j) {
-                    std::cout << l_args.id_label.at(pair.output(e)) << std::endl;
+                    std::cout << id_label.at(pair.output(e)) << std::endl;
                 }
                 t = head_time;
             }
@@ -176,17 +270,17 @@ void alignment_env::run()
                 int head_time = graph.time(graph.head(std::get<1>(e)));
 
                 if (ebt::in(std::string("subsampling"), args)) {
-                    tail_time *= 2 * (outer_layer - 1);
-                    head_time *= 2 * (outer_layer - 1);
+                    tail_time *= 2 * (layer - 1);
+                    head_time *= 2 * (layer - 1);
                 }
 
                 std::cout << tail_time << " " << head_time
-                    << " " << l_args.id_label.at(pair.output(e)) << std::endl;
+                    << " " << id_label.at(pair.output(e)) << std::endl;
             }
             std::cout << "." << std::endl;
         } else {
             for (auto& e: edges) {
-                std::cout << l_args.id_label.at(pair.output(e)) << " "
+                std::cout << id_label.at(pair.output(e)) << " "
                     << "(" << graph.time(graph.head(std::get<1>(e))) << ") ";
             }
             std::cout << std::endl;

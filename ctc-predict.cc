@@ -102,9 +102,6 @@ void prediction_env::run()
         std::shared_ptr<tensor_tree::vertex> var_tree
             = tensor_tree::make_var_tree(comp_graph, param);
 
-        std::shared_ptr<tensor_tree::vertex> lstm_var_tree
-            = tensor_tree::make_var_tree(comp_graph, param);
-
         std::vector<double> frame_cat;
         frame_cat.reserve(frames.size() * frames.front().size());
 
@@ -123,15 +120,15 @@ void prediction_env::run()
 
         if (ebt::in(std::string("subsampling"), args)) {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param, 0.0, nullptr, true);
+                trans = lstm_frame::make_dyer_transcriber(param->children[0], 0.0, nullptr, true);
             } else {
-                trans = lstm_frame::make_transcriber(param, 0.0, nullptr, true);
+                trans = lstm_frame::make_transcriber(param->children[0], 0.0, nullptr, true);
             }
         } else {
             if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param, 0.0, nullptr, false);
+                trans = lstm_frame::make_dyer_transcriber(param->children[0], 0.0, nullptr, false);
             } else {
-                trans = lstm_frame::make_transcriber(param, 0.0, nullptr, false);
+                trans = lstm_frame::make_transcriber(param->children[0], 0.0, nullptr, false);
             }
         }
 
@@ -142,7 +139,7 @@ void prediction_env::run()
         input_seq.feat = input;
         input_seq.mask = nullptr;
 
-        lstm::trans_seq_t feat_seq = (*trans)(lstm_var_tree, input_seq);
+        lstm::trans_seq_t feat_seq = (*trans)(var_tree->children[0], input_seq);
         lstm::fc_transcriber fc_trans { (int) label_id.size() };
         lstm::logsoftmax_transcriber logsoftmax_trans;
         auto score_seq = fc_trans(var_tree->children[1], feat_seq);

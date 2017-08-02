@@ -21,6 +21,7 @@ struct learning_env {
     std::shared_ptr<tensor_tree::vertex> param;
     std::shared_ptr<tensor_tree::vertex> opt_data;
 
+    int nepoch;
     double step_size;
     double dropout;
     double clip;
@@ -63,6 +64,7 @@ int main(int argc, char *argv[])
             {"dyer-lstm", "", false},
             {"type", "ctc,ctc-1b,hmm1s,hmm2s", true},
             {"opt", "const-step,rmsprop,adagrad,adam", true},
+            {"nepoch", "", false},
             {"step-size", "", true},
             {"clip", "", false},
             {"decay", "", false},
@@ -121,6 +123,11 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         clip = std::stod(args.at("clip"));
     }
 
+    nepoch = 1;
+    if (ebt::in(std::string("nepoch"), args)) {
+        nepoch = std::stoi(args.at("nepoch"));
+    }
+
     id_label = speech::load_label_set(args.at("label"));
     for (int i = 0; i < id_label.size(); ++i) {
         label_id[id_label[i]] = i;
@@ -138,23 +145,10 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         iss >> gen;
     }
 
-    if (ebt::in(std::string("shuffle"), args)) {
-        indices.resize(frame_batch.pos.size());
+    indices.resize(frame_batch.pos.size());
 
-        for (int i = 0; i < indices.size(); ++i) {
-            indices[i] = i;
-        }
-        std::shuffle(indices.begin(), indices.end(), gen);
-
-        std::vector<unsigned long> pos = frame_batch.pos;
-        for (int i = 0; i < indices.size(); ++i) {
-            frame_batch.pos[i] = pos[indices[i]];
-        }
-
-        pos = label_batch.pos;
-        for (int i = 0; i < indices.size(); ++i) {
-            label_batch.pos[i] = pos[indices[i]];
-        }
+    for (int i = 0; i < indices.size(); ++i) {
+        indices[i] = i;
     }
 
     if (args.at("opt") == "const-step") {
@@ -188,196 +182,195 @@ void learning_env::run()
 {
     ebt::Timer timer;
 
-    int nsample = 0;
+    for (int epoch = 0; epoch < nepoch; ++epoch) {
 
-    while (nsample < frame_batch.pos.size()) {
+        if (ebt::in(std::string("shuffle"), args)) {
+            std::shuffle(indices.begin(), indices.end(), gen);
 
-        std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_batch.at(nsample));
-        std::vector<std::string> label_seq = speech::load_label_seq_batch(label_batch.at(nsample));
+            std::vector<unsigned long> pos = frame_batch.pos;
+            for (int i = 0; i < indices.size(); ++i) {
+                frame_batch.pos[i] = pos[indices[i]];
+            }
 
-        std::vector<int> label_id_seq;
-        for (auto& s: label_seq) {
-            label_id_seq.push_back(label_id.at(s));
+            pos = label_batch.pos;
+            for (int i = 0; i < indices.size(); ++i) {
+                label_batch.pos[i] = pos[indices[i]];
+            }
         }
 
-        std::cout << "sample: " << nsample + 1 << std::endl;
-        std::cout << "gold len: " << label_seq.size() << std::endl;
+        int nsample = 0;
 
-        autodiff::computation_graph comp_graph;
-        std::shared_ptr<tensor_tree::vertex> var_tree
-            = tensor_tree::make_var_tree(comp_graph, param);
+        while (nsample < frame_batch.pos.size()) {
 
-        std::shared_ptr<tensor_tree::vertex> lstm_var_tree
-            = tensor_tree::make_var_tree(comp_graph, param);
+            std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_batch.at(nsample));
+            std::vector<std::string> label_seq = speech::load_label_seq_batch(label_batch.at(nsample));
 
-        std::vector<double> frame_cat;
-        frame_cat.reserve(frames.size() * frames.front().size());
+            std::vector<int> label_id_seq;
+            for (auto& s: label_seq) {
+                label_id_seq.push_back(label_id.at(s));
+            }
 
-        for (int i = 0; i < frames.size(); ++i) {
-            frame_cat.insert(frame_cat.end(), frames[i].begin(), frames[i].end());
-        }
+            std::cout << "sample: " << nsample + 1 << std::endl;
+            std::cout << "gold len: " << label_seq.size() << std::endl;
 
-        unsigned int nframes = frames.size();
-        unsigned int ndim = frames.front().size();
+            autodiff::computation_graph comp_graph;
+            std::shared_ptr<tensor_tree::vertex> var_tree
+                = tensor_tree::make_var_tree(comp_graph, param);
 
-        std::shared_ptr<autodiff::op_t> input
-            = comp_graph.var(la::cpu::weak_tensor<double>(
-                frame_cat.data(), { nframes, ndim }));
+            std::vector<double> frame_cat;
+            frame_cat.reserve(frames.size() * frames.front().size());
 
-        input->grad_needed = false;
+            for (int i = 0; i < frames.size(); ++i) {
+                frame_cat.insert(frame_cat.end(), frames[i].begin(), frames[i].end());
+            }
 
-        std::cout << "random: " << gen << std::endl;
+            unsigned int nframes = frames.size();
+            unsigned int ndim = frames.front().size();
 
-        std::shared_ptr<lstm::transcriber> trans;
+            std::shared_ptr<autodiff::op_t> input
+                = comp_graph.var(la::cpu::weak_tensor<double>(
+                    frame_cat.data(), { nframes, ndim }));
 
-        if (ebt::in(std::string("subsampling"), args)) {
-            if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param, dropout, &gen, true);
+            input->grad_needed = false;
+
+            std::cout << "random: " << gen << std::endl;
+
+            std::shared_ptr<lstm::transcriber> trans;
+
+            if (ebt::in(std::string("subsampling"), args)) {
+                if (ebt::in(std::string("dyer-lstm"), args)) {
+                    trans = lstm_frame::make_dyer_transcriber(param->children[0], dropout, &gen, true);
+                } else {
+                    trans = lstm_frame::make_transcriber(param->children[0], dropout, &gen, true);
+                }
             } else {
-                trans = lstm_frame::make_transcriber(param, dropout, &gen, true);
-            }
-        } else {
-            if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param, dropout, &gen, false);
-            } else {
-                trans = lstm_frame::make_transcriber(param, dropout, &gen, false);
-            }
-        }
-
-        lstm::trans_seq_t input_seq;
-        input_seq.nframes = frames.size();
-        input_seq.batch_size = 1;
-        input_seq.dim = frames.front().size();
-        input_seq.feat = input;
-        input_seq.mask = nullptr;
-
-        lstm::trans_seq_t feat_seq = (*trans)(lstm_var_tree, input_seq);
-        lstm::fc_transcriber fc_trans { (int) label_id.size() };
-        lstm::logsoftmax_transcriber logsoftmax_trans;
-        auto score_seq = fc_trans(var_tree->children[1], feat_seq);
-        auto output_seq = logsoftmax_trans(nullptr, score_seq);
-
-        std::shared_ptr<autodiff::op_t> logprob = output_seq.feat;
-
-        auto& logprob_t = autodiff::get_output<la::cpu::tensor_like<double>>(logprob);
-
-        std::cout << "frames: " << frames.size() << " downsampled: " << logprob_t.size(0) << std::endl;
-
-        if (logprob_t.size(0) < label_seq.size()) {
-            continue;
-        }
-
-        ifst::fst graph_fst = ctc::make_frame_fst(logprob_t.size(0), label_id, id_label);
-
-        auto& logprob_mat = logprob_t.as_matrix();
-        auto logprob_m = autodiff::weak_var(logprob, 0, std::vector<unsigned int> { logprob_mat.rows(), logprob_mat.cols() });
-
-        seg::iseg_data graph_data;
-        graph_data.fst = std::make_shared<ifst::fst>(graph_fst);
-        graph_data.weight_func = std::make_shared<ctc::label_weight>(ctc::label_weight(logprob_m));
-
-        ifst::fst label_fst;
-
-        if (args.at("type") == "ctc") {
-            label_fst = ctc::make_label_fst(label_id_seq, label_id, id_label);
-        } else if (args.at("type") == "ctc-1b") {
-            label_fst = ctc::make_label_fst_1b(label_id_seq, label_id, id_label);
-        } else if (args.at("type") == "hmm1s") {
-            label_fst = ctc::make_label_fst_hmm1s(label_id_seq, label_id, id_label);
-        } else if (args.at("type") == "hmm2s") {
-            label_fst = ctc::make_label_fst_hmm2s(label_id_seq, label_id, id_label);
-        } else {
-            std::cout << "unknown type " << args.at("type") << std::endl;
-            exit(1);
-        }
-
-        ctc::loss_func loss {graph_data, label_fst};
-
-        double ell = loss.loss();
-
-        std::cout << "loss: " << ell << std::endl;
-        std::cout << "E: " << ell / label_seq.size() << std::endl;
-
-        std::shared_ptr<tensor_tree::vertex> param_grad;
-
-        if (ebt::in(std::string("dyer-lstm"), args)) {
-            param_grad = lstm_frame::make_dyer_tensor_tree(layer);
-        } else {
-            param_grad = lstm_frame::make_tensor_tree(layer);
-        }
-
-        if (ell > 0) {
-            loss.grad();
-            graph_data.weight_func->grad();
-
-            auto topo_order = autodiff::natural_topo_order(comp_graph);
-            autodiff::guarded_grad(topo_order, autodiff::grad_funcs);
-            tensor_tree::copy_grad(param_grad, lstm_var_tree);
-
-            {
-                auto vars = tensor_tree::leaves_pre_order(param_grad);
-                std::cout << vars.back()->name << " "
-                    << "analytic grad: " << tensor_tree::get_tensor(vars[0]).data()[0]
-                    << std::endl;
-            }
-
-            std::vector<std::shared_ptr<tensor_tree::vertex>> vars = tensor_tree::leaves_pre_order(param);
-
-            double v1 = tensor_tree::get_tensor(vars[0]).data()[0];
-
-            if (ebt::in(std::string("clip"), args)) {
-                double n = tensor_tree::norm(param_grad);
-
-                if (n > clip) {
-                    tensor_tree::imul(param_grad, clip / n);
-
-                    std::cout << "grad norm: " << n
-                        << " clip: " << clip << " gradient clipped" << std::endl;
+                if (ebt::in(std::string("dyer-lstm"), args)) {
+                    trans = lstm_frame::make_dyer_transcriber(param->children[0], dropout, &gen, false);
+                } else {
+                    trans = lstm_frame::make_transcriber(param->children[0], dropout, &gen, false);
                 }
             }
 
-            opt->update(param_grad);
+            lstm::trans_seq_t input_seq;
+            input_seq.nframes = frames.size();
+            input_seq.batch_size = 1;
+            input_seq.dim = frames.front().size();
+            input_seq.feat = input;
+            input_seq.mask = nullptr;
 
-            double v2 = tensor_tree::get_tensor(vars[0]).data()[0];
+            lstm::trans_seq_t feat_seq = (*trans)(var_tree->children[0], input_seq);
+            lstm::fc_transcriber fc_trans { (int) label_id.size() };
+            lstm::logsoftmax_transcriber logsoftmax_trans;
+            auto score_seq = fc_trans(var_tree->children[1], feat_seq);
+            auto output_seq = logsoftmax_trans(nullptr, score_seq);
 
-            std::cout << "weight: " << v1 << " update: " << v2 - v1
-                << " ratio: " << (v2 - v1) / v1 << std::endl;
+            std::shared_ptr<autodiff::op_t> logprob = output_seq.feat;
 
-        }
+            auto& logprob_t = autodiff::get_output<la::cpu::tensor_like<double>>(logprob);
 
-        if (ell < 0) {
-            std::cout << "loss is less than zero.  skipping." << std::endl;
+            std::cout << "frames: " << frames.size() << " downsampled: " << logprob_t.size(0) << std::endl;
 
-#if 0
-            std::cout << "sample: " << indices[nsample] << std::endl;
+            if (logprob_t.size(0) < label_seq.size()) {
+                continue;
+            }
 
-            std::ofstream param_ofs { "param-debug" };
-            param_ofs << layer << std::endl;
-            tensor_tree::save_tensor(param, param_ofs);
-            param_ofs.close();
+            ifst::fst graph_fst = ctc::make_frame_fst(logprob_t.size(0), label_id, id_label);
 
-            std::ofstream opt_data_ofs { "opt-data-debug" };
-            opt_data_ofs << layer << std::endl;
-            opt->save_opt_data(opt_data_ofs);
-            opt_data_ofs.close();
+            auto& logprob_mat = logprob_t.as_matrix();
+            auto logprob_m = autodiff::weak_var(logprob, 0, std::vector<unsigned int> { logprob_mat.rows(), logprob_mat.cols() });
 
-            exit(1);
-#endif
-        }
+            seg::iseg_data graph_data;
+            graph_data.fst = std::make_shared<ifst::fst>(graph_fst);
+            graph_data.weight_func = std::make_shared<ctc::label_weight>(ctc::label_weight(logprob_m));
 
-        double n = tensor_tree::norm(param);
+            ifst::fst label_fst;
 
-        std::cout << "norm: " << n << std::endl;
+            if (args.at("type") == "ctc") {
+                label_fst = ctc::make_label_fst(label_id_seq, label_id, id_label);
+            } else if (args.at("type") == "ctc-1b") {
+                label_fst = ctc::make_label_fst_1b(label_id_seq, label_id, id_label);
+            } else if (args.at("type") == "hmm1s") {
+                label_fst = ctc::make_label_fst_hmm1s(label_id_seq, label_id, id_label);
+            } else if (args.at("type") == "hmm2s") {
+                label_fst = ctc::make_label_fst_hmm2s(label_id_seq, label_id, id_label);
+            } else {
+                std::cout << "unknown type " << args.at("type") << std::endl;
+                exit(1);
+            }
 
-        std::cout << std::endl;
+            ctc::loss_func loss {graph_data, label_fst};
 
-        ++nsample;
+            double ell = loss.loss();
+
+            std::cout << "loss: " << ell << std::endl;
+            std::cout << "E: " << ell / label_seq.size() << std::endl;
+
+            std::shared_ptr<tensor_tree::vertex> param_grad;
+
+            if (ebt::in(std::string("dyer-lstm"), args)) {
+                param_grad = lstm_frame::make_dyer_tensor_tree(layer);
+            } else {
+                param_grad = lstm_frame::make_tensor_tree(layer);
+            }
+
+            if (ell > 0) {
+                loss.grad();
+                graph_data.weight_func->grad();
+
+                auto topo_order = autodiff::natural_topo_order(comp_graph);
+                autodiff::guarded_grad(topo_order, autodiff::grad_funcs);
+                tensor_tree::copy_grad(param_grad, var_tree);
+
+                {
+                    auto vars = tensor_tree::leaves_pre_order(param_grad);
+                    std::cout << vars.back()->name << " "
+                        << "analytic grad: " << tensor_tree::get_tensor(vars[0]).data()[0]
+                        << std::endl;
+                }
+
+                std::vector<std::shared_ptr<tensor_tree::vertex>> vars = tensor_tree::leaves_pre_order(param);
+
+                double v1 = tensor_tree::get_tensor(vars[0]).data()[0];
+
+                if (ebt::in(std::string("clip"), args)) {
+                    double n = tensor_tree::norm(param_grad);
+
+                    if (n > clip) {
+                        tensor_tree::imul(param_grad, clip / n);
+
+                        std::cout << "grad norm: " << n
+                            << " clip: " << clip << " gradient clipped" << std::endl;
+                    }
+                }
+
+                opt->update(param_grad);
+
+                double v2 = tensor_tree::get_tensor(vars[0]).data()[0];
+
+                std::cout << "weight: " << v1 << " update: " << v2 - v1
+                    << " ratio: " << (v2 - v1) / v1 << std::endl;
+
+            }
+
+            if (ell < 0) {
+                std::cout << "loss is less than zero.  skipping." << std::endl;
+            }
+
+            double n = tensor_tree::norm(param);
+
+            std::cout << "norm: " << n << std::endl;
+
+            std::cout << std::endl;
+
+            ++nsample;
 
 #if DEBUG_TOP
-        if (nsample == DEBUG_TOP) {
-            break;
-        }
+            if (nsample == DEBUG_TOP) {
+                break;
+            }
 #endif
+
+        }
 
     }
 
