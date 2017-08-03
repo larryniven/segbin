@@ -173,7 +173,6 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     }
 
     std::ifstream opt_data_ifs { args.at("opt-data") };
-    std::getline(opt_data_ifs, line);
     opt->load_opt_data(opt_data_ifs);
     opt_data_ifs.close();
 }
