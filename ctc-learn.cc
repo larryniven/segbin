@@ -11,8 +11,8 @@ using namespace std::string_literals;
 
 struct learning_env {
 
-    speech::batch_indices frame_batch;
-    speech::batch_indices label_batch;
+    speech::scp frame_scp;
+    speech::scp label_scp;
 
     std::string output_param;
     std::string output_opt_data;
@@ -50,8 +50,8 @@ int main(int argc, char *argv[])
         "ctc-learn",
         "Train RNN with CTC",
         {
-            {"frame-batch", "", false},
-            {"label-batch", "", true},
+            {"frame-scp", "", false},
+            {"label-scp", "", true},
             {"param", "", true},
             {"opt-data", "", true},
             {"output-param", "", false},
@@ -97,8 +97,8 @@ int main(int argc, char *argv[])
 learning_env::learning_env(std::unordered_map<std::string, std::string> args)
     : args(args)
 {
-    frame_batch.open(args.at("frame-batch"));
-    label_batch.open(args.at("label-batch"));
+    frame_scp.open(args.at("frame-scp"));
+    label_scp.open(args.at("label-scp"));
 
     std::ifstream param_ifs { args.at("param") };
     std::string line;
@@ -145,7 +145,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         iss >> gen;
     }
 
-    indices.resize(frame_batch.pos.size());
+    indices.resize(frame_scp.entries.size());
 
     for (int i = 0; i < indices.size(); ++i) {
         indices[i] = i;
@@ -185,24 +185,14 @@ void learning_env::run()
 
         if (ebt::in(std::string("shuffle"), args)) {
             std::shuffle(indices.begin(), indices.end(), gen);
-
-            std::vector<unsigned long> pos = frame_batch.pos;
-            for (int i = 0; i < indices.size(); ++i) {
-                frame_batch.pos[i] = pos[indices[i]];
-            }
-
-            pos = label_batch.pos;
-            for (int i = 0; i < indices.size(); ++i) {
-                label_batch.pos[i] = pos[indices[i]];
-            }
         }
 
         int nsample = 0;
 
-        while (nsample < frame_batch.pos.size()) {
+        while (nsample < indices.size()) {
 
-            std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_batch.at(nsample));
-            std::vector<std::string> label_seq = speech::load_label_seq_batch(label_batch.at(nsample));
+            std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_scp.at(indices[nsample]));
+            std::vector<std::string> label_seq = speech::load_label_seq_batch(label_scp.at(indices[nsample]));
 
             std::vector<int> label_id_seq;
             for (auto& s: label_seq) {
