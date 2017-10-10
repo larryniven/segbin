@@ -8,7 +8,7 @@
 
 struct prediction_env {
 
-    std::ifstream frame_batch;
+    speech::scp frame_scp;
 
     int layer;
     std::shared_ptr<tensor_tree::vertex> param;
@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
         "ctc-predict",
         "Find 1-best path",
         {
-            {"frame-batch", "", false},
+            {"frame-scp", "", false},
             {"param", "", true},
             {"label", "", true},
             {"subsampling", "", false},
@@ -64,7 +64,7 @@ int main(int argc, char *argv[])
 prediction_env::prediction_env(std::unordered_map<std::string, std::string> args)
     : args(args)
 {
-    frame_batch.open(args.at("frame-batch"));
+    frame_scp.open(args.at("frame-scp"));
 
     std::ifstream param_ifs { args.at("param") };
     std::string line;
@@ -90,13 +90,9 @@ void prediction_env::run()
 
     int nsample = 0;
 
-    while (1) {
+    while (nsample < frame_scp.entries.size()) {
 
-        std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_batch);
-
-        if (!frame_batch) {
-            break;
-        }
+        std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_scp.at(nsample));
 
         autodiff::computation_graph comp_graph;
         std::shared_ptr<tensor_tree::vertex> var_tree
