@@ -1,7 +1,8 @@
 #include "seg/seg-util.h"
 #include "fst/ifst.h"
 #include "ebt/ebt.h"
-#include "speech/speech.h"
+#include "util/speech.h"
+#include "util/util.h"
 #include "fst/fst-algo.h"
 #include "seg/lat.h"
 #include <fstream>
@@ -73,7 +74,7 @@ oracle_env::oracle_env(std::unordered_map<std::string, std::string> args)
 
     lattice_batch.open(args.at("lattice-batch"));
 
-    i_args.label_id = speech::load_label_id(args.at("label"));
+    i_args.label_id = util::load_label_id(args.at("label"));
 
     i_args.id_label.resize(i_args.label_id.size());
     for (auto& p: i_args.label_id) {

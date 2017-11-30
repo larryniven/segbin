@@ -1,5 +1,6 @@
 #include "seg/seg-util.h"
-#include "speech/speech.h"
+#include "util/speech.h"
+#include "util/util.h"
 #include <fstream>
 #include "ebt/ebt.h"
 #include "seg/loss.h"
@@ -87,7 +88,7 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
         stride = std::stoi(args.at("stride"));
     }
 
-    id_label = speech::load_label_set(args.at("label"));
+    id_label = util::load_label_set(args.at("label"));
     for (int i = 0; i < id_label.size(); ++i) {
         label_id[id_label[i]] = i;
     }

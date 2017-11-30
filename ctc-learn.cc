@@ -1,5 +1,7 @@
 #include "seg/seg-util.h"
-#include "speech/speech.h"
+#include "util/speech.h"
+#include "util/batch.h"
+#include "util/util.h"
 #include <fstream>
 #include "ebt/ebt.h"
 #include "seg/loss.h"
@@ -7,12 +9,10 @@
 #include "nn/lstm-frame.h"
 #include <sstream>
 
-using namespace std::string_literals;
-
 struct learning_env {
 
-    speech::scp frame_scp;
-    speech::scp label_scp;
+    batch::scp frame_scp;
+    batch::scp label_scp;
 
     std::string output_param;
     std::string output_opt_data;
@@ -128,7 +128,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         nepoch = std::stoi(args.at("nepoch"));
     }
 
-    id_label = speech::load_label_set(args.at("label"));
+    id_label = util::load_label_set(args.at("label"));
     for (int i = 0; i < id_label.size(); ++i) {
         label_id[id_label[i]] = i;
     }
@@ -140,7 +140,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
 
     gen = std::default_random_engine { seed };
 
-    if (ebt::in("random-state"s, args)) {
+    if (ebt::in(std::string("random-state"), args)) {
         std::istringstream iss { args.at("random-state") };
         iss >> gen;
     }
@@ -325,7 +325,7 @@ void learning_env::run()
                     double n = tensor_tree::norm(param_grad);
 
                     if (n > clip) {
-                        tensor_tree::imul(param_grad, clip / n);
+                        tensor_tree::axpy(param_grad, clip / n - 1, param_grad);
 
                         std::cout << "grad norm: " << n
                             << " clip: " << clip << " gradient clipped" << std::endl;

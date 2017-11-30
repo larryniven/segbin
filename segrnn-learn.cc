@@ -1,5 +1,6 @@
 #include "seg/seg-util.h"
-#include "speech/speech.h"
+#include "util/speech.h"
+#include "util/util.h"
 #include <fstream>
 #include "ebt/ebt.h"
 #include "seg/loss.h"
@@ -97,7 +98,6 @@ int main(int argc, char *argv[])
             {"logsoftmax", "", false},
             {"subsampling", "", false},
             {"type", "std,std-1b", true},
-            {"drop-edges", "", false},
             {"nepoch", "", false},
             {"opt", "const-step,const-step-momentum,rmsprop,adagrad,adam", true},
             {"step-size", "", true},
@@ -196,7 +196,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
 
     gen = std::default_random_engine{seed};
 
-    id_label = speech::load_label_set(args.at("label"));
+    id_label = util::load_label_set(args.at("label"));
     for (int i = 0; i < id_label.size(); ++i) {
         label_id[id_label[i]] = i;
     }
@@ -334,11 +334,7 @@ void learning_env::run()
             }
 
             seg::iseg_data graph_data;
-            if (ebt::in(std::string("drop-edges"), args)) {
-                graph_data.fst = seg::make_random_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride, 1.0 - std::stod(args.at("drop-edges")), gen);
-            } else {
-                graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride);
-            }
+            graph_data.fst = seg::make_graph(hidden_t.size(0), label_id, id_label, min_seg, max_seg, stride);
             graph_data.topo_order = std::make_shared<std::vector<int>>(fst::topo_order(*graph_data.fst));
 
             auto& m = hidden_t.as_matrix();
@@ -417,7 +413,7 @@ void learning_env::run()
                     std::cout << "grad norm: " << n;
 
                     if (n > clip) {
-                        tensor_tree::imul(param_grad, clip / n);
+                        tensor_tree::axpy(param_grad, clip / n - 1, param_grad);
 
                         std::cout << " clip: " << clip << " gradient clipped";
                     }
