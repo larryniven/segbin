@@ -1,22 +1,11 @@
 #include "seg/seg-util.h"
 #include "util/speech.h"
 #include "util/util.h"
+#include "util/batch.h"
 #include "fst/fst-algo.h"
 #include "seg/seg.h"
 #include <fstream>
 #include "nn/lstm-frame.h"
-
-std::shared_ptr<tensor_tree::vertex> make_dyer_tensor_tree(
-    std::vector<std::string> const& features,
-    int layer)
-{
-    tensor_tree::vertex root;
-
-    root.children.push_back(seg::make_tensor_tree(features));
-    root.children.push_back(lstm_frame::make_dyer_tensor_tree(layer));
-
-    return std::make_shared<tensor_tree::vertex>(root);
-}
 
 std::shared_ptr<tensor_tree::vertex> make_tensor_tree(
     std::vector<std::string> const& features,
@@ -34,8 +23,8 @@ struct alignment_env {
 
     std::vector<std::string> features;
 
-    std::ifstream frame_batch;
-    std::ifstream label_batch;
+    batch::scp frame_scp;
+    batch::scp label_scp;
 
     int max_seg;
     int min_seg;
@@ -103,18 +92,14 @@ alignment_env::alignment_env(std::unordered_map<std::string, std::string> args)
 {
     features = ebt::split(args.at("features"), ",");
 
-    frame_batch.open(args.at("frame-batch"));
-    label_batch.open(args.at("label-batch"));
+    frame_scp.open(args.at("frame-scp"));
+    label_scp.open(args.at("label-scp"));
 
     std::ifstream param_ifs { args.at("param") };
     std::string line;
     std::getline(param_ifs, line);
     layer = std::stoi(line);
-    if (ebt::in(std::string("dyer-lstm"), args)) {
-        param = make_dyer_tensor_tree(features, layer);
-    } else {
-        param = make_tensor_tree(features, layer);
-    }
+    param = make_tensor_tree(features, layer);
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
 
@@ -150,14 +135,10 @@ void alignment_env::run()
 {
     int nsample = 0;
 
-    while (1) {
+    while (nsample < frame_scp.entries.size()) {
 
-        std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_batch);
-        std::vector<int> label_seq = speech::load_label_seq_batch(label_batch, label_id);
-
-        if (!frame_batch || !label_batch) {
-            break;
-        }
+        std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_scp.at(nsample));
+        std::vector<int> label_seq = speech::load_label_seq_batch(label_scp.at(nsample), label_id);
 
         autodiff::computation_graph comp_graph;
 
@@ -183,17 +164,9 @@ void alignment_env::run()
         std::shared_ptr<lstm::transcriber> trans;
 
         if (ebt::in(std::string("subsampling"), args)) {
-            if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], 0.0, nullptr, true);
-            } else {
-                trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, true);
-            }
+            trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, true);
         } else {
-            if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], 0.0, nullptr, false);
-            } else {
-                trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, false);
-            }
+            trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, false);
         }
 
         lstm::trans_seq_t input_seq;
@@ -254,7 +227,7 @@ void alignment_env::run()
         seg::seg_fst<seg::iseg_data> graph { graph_data };
 
         if (ebt::in(std::string("frames"), args)) {
-            std::cout << nsample + 1 << ".phn" << std::endl;
+            std::cout << frame_scp.entries[nsample].key << std::endl;
             int t = 0;
             for (auto& e: edges) {
                 int head_time = graph.time(graph.head(std::get<1>(e)));
@@ -265,7 +238,7 @@ void alignment_env::run()
             }
             std::cout << "." << std::endl;
         } else if (ebt::in(std::string("segs"), args)) {
-            std::cout << nsample + 1 << ".phn" << std::endl;
+            std::cout << frame_scp.entries[nsample].key << std::endl;
             for (auto& e: edges) {
                 int tail_time = graph.time(graph.tail(std::get<1>(e)));
                 int head_time = graph.time(graph.head(std::get<1>(e)));

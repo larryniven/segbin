@@ -1,22 +1,11 @@
 #include "seg/seg-util.h"
 #include "util/speech.h"
 #include "util/util.h"
+#include "util/batch.h"
 #include <fstream>
 #include "ebt/ebt.h"
 #include "seg/loss.h"
 #include "nn/lstm-frame.h"
-
-std::shared_ptr<tensor_tree::vertex> make_dyer_tensor_tree(
-    std::vector<std::string> const& features,
-    int layer)
-{
-    tensor_tree::vertex root;
-
-    root.children.push_back(seg::make_tensor_tree(features));
-    root.children.push_back(lstm_frame::make_dyer_tensor_tree(layer));
-
-    return std::make_shared<tensor_tree::vertex>(root);
-}
 
 std::shared_ptr<tensor_tree::vertex> make_tensor_tree(
     std::vector<std::string> const& features,
@@ -34,8 +23,8 @@ struct learning_env {
 
     std::vector<std::string> features;
 
-    speech::batch_indices frame_batch;
-    speech::batch_indices label_batch;
+    batch::scp frame_scp;
+    batch::scp label_scp;
 
     int max_seg;
     int min_seg;
@@ -79,15 +68,14 @@ int main(int argc, char *argv[])
         "segrnn-learn",
         "Learn segmental RNN",
         {
-            {"frame-batch", "", true},
-            {"label-batch", "", true},
+            {"frame-scp", "", true},
+            {"label-scp", "", true},
             {"min-seg", "", false},
             {"max-seg", "", false},
             {"stride", "", false},
             {"param", "", true},
             {"opt-data", "", true},
             {"features", "", true},
-            {"dyer-lstm", "", false},
             {"output-param", "", false},
             {"output-opt-data", "", false},
             {"label", "", true},
@@ -133,18 +121,14 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
 {
     features = ebt::split(args.at("features"), ",");
 
-    frame_batch.open(args.at("frame-batch"));
-    label_batch.open(args.at("label-batch"));
+    frame_scp.open(args.at("frame-scp"));
+    label_scp.open(args.at("label-scp"));
 
     std::ifstream param_ifs { args.at("param") };
     std::string line;
     std::getline(param_ifs, line);
     layer = std::stoi(line);
-    if (ebt::in(std::string("dyer-lstm"), args)) {
-        param = make_dyer_tensor_tree(features, layer);
-    } else {
-        param = make_tensor_tree(features, layer);
-    }
+    param = make_tensor_tree(features, layer);
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
 
@@ -205,7 +189,7 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         rep_labels = ebt::split(args.at("rep-labels"), ",");
     }
 
-    indices.resize(frame_batch.pos.size());
+    indices.resize(frame_scp.entries.size());
 
     for (int i = 0; i < indices.size(); ++i) {
         indices[i] = i;
@@ -249,23 +233,13 @@ void learning_env::run()
 
         if (ebt::in(std::string("shuffle"), args)) {
             std::shuffle(indices.begin(), indices.end(), gen);
-
-            std::vector<unsigned long> pos = frame_batch.pos;
-            for (int i = 0; i < indices.size(); ++i) {
-                frame_batch.pos[i] = pos[indices[i]];
-            }
-
-            pos = label_batch.pos;
-            for (int i = 0; i < indices.size(); ++i) {
-                label_batch.pos[i] = pos[indices[i]];
-            }
         }
 
-        while (nsample < frame_batch.pos.size()) {
+        while (nsample < indices.size()) {
 
-            std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_batch.at(nsample));
+            std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_scp.at(indices[nsample]));
 
-            std::vector<int> label_seq = speech::load_label_seq_batch(label_batch.at(nsample), label_id);
+            std::vector<int> label_seq = speech::load_label_seq_batch(label_scp.at(indices[nsample]), label_id);
 
             std::cout << "sample: " << nsample + 1 << std::endl;
             std::cout << "gold len: " << label_seq.size() << std::endl;
@@ -292,17 +266,9 @@ void learning_env::run()
 
             std::shared_ptr<lstm::transcriber> trans;
             if (ebt::in(std::string("subsampling"), args)) {
-                if (ebt::in(std::string("dyer-lstm"), args)) {
-                    trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], dropout, &gen, true);
-                } else {
-                    trans = lstm_frame::make_transcriber(param->children[1]->children[0], dropout, &gen, true);
-                }
+                trans = lstm_frame::make_transcriber(param->children[1]->children[0], dropout, &gen, true);
             } else {
-                if (ebt::in(std::string("dyer-lstm"), args)) {
-                    trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], dropout, &gen, false);
-                } else {
-                    trans = lstm_frame::make_transcriber(param->children[1]->children[0], dropout, &gen, false);
-                }
+                trans = lstm_frame::make_transcriber(param->children[1]->children[0], dropout, &gen, false);
             }
 
             lstm::trans_seq_t input_seq;
@@ -372,13 +338,7 @@ void learning_env::run()
             std::cout << "loss: " << ell << std::endl;
             std::cout << "E: " << ell / label_seq.size() << std::endl;
 
-            std::shared_ptr<tensor_tree::vertex> param_grad;
-
-            if (ebt::in(std::string("dyer-lstm"), args)) {
-                param_grad = make_dyer_tensor_tree(features, layer);
-            } else {
-                param_grad = make_tensor_tree(features, layer);
-            }
+            std::shared_ptr<tensor_tree::vertex> param_grad = make_tensor_tree(features, layer);
 
             if (ell > 0) {
                 loss_func->grad();

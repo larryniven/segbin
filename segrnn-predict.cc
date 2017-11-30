@@ -1,21 +1,10 @@
 #include "seg/seg-util.h"
 #include "util/speech.h"
 #include "util/util.h"
+#include "util/batch.h"
 #include "fst/fst-algo.h"
 #include "nn/lstm-frame.h"
 #include <fstream>
-
-std::shared_ptr<tensor_tree::vertex> make_dyer_tensor_tree(
-    std::vector<std::string> const& features,
-    int layer)
-{
-    tensor_tree::vertex root;
-
-    root.children.push_back(seg::make_tensor_tree(features));
-    root.children.push_back(lstm_frame::make_dyer_tensor_tree(layer));
-
-    return std::make_shared<tensor_tree::vertex>(root);
-}
 
 std::shared_ptr<tensor_tree::vertex> make_tensor_tree(
     std::vector<std::string> const& features,
@@ -33,7 +22,7 @@ struct prediction_env {
 
     std::vector<std::string> features;
 
-    std::ifstream frame_batch;
+    batch::scp frame_scp;
 
     int min_seg;
     int max_seg;
@@ -59,7 +48,7 @@ int main(int argc, char *argv[])
         "segrnn-predict",
         "Predict with segmental RNN",
         {
-            {"frame-batch", "", false},
+            {"frame-scp", "", false},
             {"min-seg", "", false},
             {"max-seg", "", false},
             {"stride", "", false},
@@ -67,7 +56,6 @@ int main(int argc, char *argv[])
             {"features", "", true},
             {"subsampling", "", false},
             {"logsoftmax", "", false},
-            {"dyer-lstm", "", false},
             {"label", "", true},
             {"print-path", "", false},
         }
@@ -97,17 +85,13 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
 {
     features = ebt::split(args.at("features"), ",");
 
-    frame_batch.open(args.at("frame-batch"));
+    frame_scp.open(args.at("frame-scp"));
 
     std::ifstream param_ifs { args.at("param") };
     std::string line;
     std::getline(param_ifs, line);
     layer = std::stoi(line);
-    if (ebt::in(std::string("dyer-lstm"), args)) {
-        param = make_dyer_tensor_tree(features, layer);
-    } else {
-        param = make_tensor_tree(features, layer);
-    }
+    param = make_tensor_tree(features, layer);
     tensor_tree::load_tensor(param, param_ifs);
     param_ifs.close();
 
@@ -134,15 +118,11 @@ prediction_env::prediction_env(std::unordered_map<std::string, std::string> args
 
 void prediction_env::run()
 {
-    int nsample = 1;
+    int nsample = 0;
 
-    while (1) {
+    while (nsample < frame_scp.entries.size()) {
 
-        std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_batch);
-
-        if (!frame_batch) {
-            break;
-        }
+        std::vector<std::vector<double>> frames = speech::load_frame_batch(frame_scp.at(nsample));
 
         autodiff::computation_graph comp_graph;
         std::shared_ptr<tensor_tree::vertex> var_tree
@@ -167,17 +147,9 @@ void prediction_env::run()
         std::shared_ptr<lstm::transcriber> trans;
 
         if (ebt::in(std::string("subsampling"), args)) {
-            if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], 0.0, nullptr, true);
-            } else {
-                trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, true);
-            }
+            trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, true);
         } else {
-            if (ebt::in(std::string("dyer-lstm"), args)) {
-                trans = lstm_frame::make_dyer_transcriber(param->children[1]->children[0], 0.0, nullptr, false);
-            } else {
-                trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, false);
-            }
+            trans = lstm_frame::make_transcriber(param->children[1]->children[0], 0.0, nullptr, false);
         }
 
         lstm::trans_seq_t input_seq;
@@ -216,7 +188,7 @@ void prediction_env::run()
         std::vector<int> path = fst::shortest_path(graph, *graph_data.topo_order);
 
         if (ebt::in(std::string("print-path"), args)) {
-            std::cout << nsample << ".txt" << std::endl;
+            std::cout << frame_scp.entries[nsample].key << std::endl;
             for (auto& e: path) {
                 std::cout << graph.time(graph.tail(e))
                     << " " << graph.time(graph.head(e))
@@ -227,7 +199,7 @@ void prediction_env::run()
             for (auto& e: path) {
                 std::cout << id_label.at(graph.output(e)) << " ";
             }
-            std::cout << "(" << nsample << ".dot)";
+            std::cout << "(" << frame_scp.entries[nsample].key << ")";
             std::cout << std::endl;
         }
 
