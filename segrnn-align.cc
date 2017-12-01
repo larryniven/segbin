@@ -129,6 +129,8 @@ alignment_env::alignment_env(std::unordered_map<std::string, std::string> args)
     for (int i = 0; i < id_label.size(); ++i) {
         label_id[id_label[i]] = i;
     }
+
+    assert(id_label[0] == "<eps>");
 }
 
 void alignment_env::run()

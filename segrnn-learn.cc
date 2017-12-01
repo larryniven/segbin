@@ -185,6 +185,8 @@ learning_env::learning_env(std::unordered_map<std::string, std::string> args)
         label_id[id_label[i]] = i;
     }
 
+    assert(id_label[0] == "<eps>");
+
     if (ebt::in(std::string("rep-labels"), args)) {
         rep_labels = ebt::split(args.at("rep-labels"), ",");
     }
