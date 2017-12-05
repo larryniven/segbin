@@ -53,8 +53,8 @@ int main(int argc, char *argv[])
         "segrnn-align",
         "Align with segmental RNN",
         {
-            {"frame-batch", "", false},
-            {"label-batch", "", true},
+            {"frame-scp", "", false},
+            {"label-scp", "", true},
             {"min-seg", "", false},
             {"max-seg", "", false},
             {"stride", "", false},
